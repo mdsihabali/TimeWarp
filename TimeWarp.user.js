@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name             Timer Hooker | Modern UI | Arrow Keys
+// @name             Timer Hooker | Modern UI | Arrow Keys | Configurable
 // @name:en         TimerHooker
 // @namespace       https://gitee.com/HGJing/everthing-hook/
-// @version         1.0.64
-// @description     Control timer speeds, skip video ads, speed up/down videos. Modern UI + arrow keys.
-// @description:en  Hook timer functions to change speed. Modern UI, keyboard arrow keys.
+// @version         2.0
+// @description     Control timer speeds, skip video ads, speed up/down videos. Modern UI, arrow keys, fully configurable.
+// @description:en  Hook timer functions to change speed. Modern UI, arrow keys, configurable.
 // @include         *
 // @require         https://greasyfork.org/scripts/372672-everything-hook/code/Everything-Hook.js?version=881251
 // @author          Cangshi (enhanced by community)
@@ -15,13 +15,51 @@
 // ==/UserScript==
 
 /**
- * Enhanced TimerHooker
- * - Modern UI: compact, draggable, tooltips, smooth animations
- * - Arrow keys: Up/Down to change speed (step 0.1, Shift step 1, Ctrl step 0.01)
- * - Video playbackRate fixed
- * - MutationObserver for new videos/iframes
- * - RequestAnimationFrame hooking (optional)
- * - Cleaned code, all text in English
+ * ================= CONFIGURATION (Edit these values as you like) =================
+ */
+const CONFIG = {
+    // Speed limits
+    MIN_SPEED: 0.1,      // Minimum playback speed (e.g., 0.1 = 10% speed)
+    MAX_SPEED: 16,       // Maximum playback speed
+
+    // Default speed (1.0 = normal)
+    DEFAULT_SPEED: 1.0,
+
+    // Button steps (for UI buttons)
+    BUTTON_STEP: 0.1,    // + / - buttons change speed by this amount
+    BUTTON_X2: 2,        // Multiply by X2 button factor
+    BUTTON_HALF: 0.5,    // Divide by 2 button factor
+
+    // Keyboard arrow keys behavior
+    ARROW_STEP: 0.1,     // Base step for arrow up/down
+    ARROW_SHIFT_STEP: 1, // Step when Shift is held
+    ARROW_CTRL_STEP: 0.01, // Step when Ctrl is held
+
+    // Keyboard shortcuts (Ctrl/Alt + other keys)
+    ENABLE_LEGACY_SHORTCUTS: true, // Enable Ctrl+Alt+[=/-/0/9] shortcuts
+
+    // UI appearance
+    UI_POSITION: { left: '20px', top: '20%' }, // Default position (can be overridden by drag)
+    UI_BLUR: true,          // Enable backdrop blur
+    UI_TRANSPARENCY: 0.85,  // Background opacity (0 to 1)
+    UI_SHOW_TOOLTIPS: true, // Show tooltips on hover
+    UI_FLASH_DURATION: 300, // Flash overlay duration (ms)
+
+    // Video handling
+    VIDEO_FORCE_RATE: true,  // Force video playbackRate to match speed
+    VIDEO_OBSERVER: true,    // Watch for dynamically added videos
+
+    // Timer hooking
+    HOOK_TIMERS: true,       // Hook setTimeout/setInterval
+    HOOK_RAF: true,          // Hook requestAnimationFrame
+    HOOK_DATE: true,         // Hook Date constructor
+
+    // Debug
+    DEBUG: false,            // Log debug messages to console
+};
+
+/**
+ * ================= END OF CONFIGURATION =================
  */
 
 window.isDOMLoaded = false;
@@ -35,6 +73,8 @@ document.addEventListener('readystatechange', function () {
 
 ~function (global) {
 
+    const debug = CONFIG.DEBUG ? (...args) => console.log('[TimerHooker]', ...args) : () => {};
+
     var extraElements = []; // for shadow DOM
 
     var helper = function (eHookContext, timerContext, util) {
@@ -42,14 +82,42 @@ document.addEventListener('readystatechange', function () {
 
         return {
             applyUI: function () {
-                // Modern CSS
+                // CSS (uses CONFIG values)
+                var blur = CONFIG.UI_BLUR ? 'backdrop-filter: blur(12px);' : '';
+                var opacity = CONFIG.UI_TRANSPARENCY;
+                var tooltipStyle = CONFIG.UI_SHOW_TOOLTIPS ? `
+                    .th-tooltip {
+                        position: relative;
+                    }
+                    .th-tooltip::after {
+                        content: attr(data-tooltip);
+                        position: absolute;
+                        bottom: 100%;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        background: #000;
+                        color: #fff;
+                        padding: 4px 8px;
+                        border-radius: 8px;
+                        font-size: 12px;
+                        white-space: nowrap;
+                        opacity: 0;
+                        pointer-events: none;
+                        transition: opacity 0.2s;
+                        margin-bottom: 8px;
+                    }
+                    .th-tooltip:hover::after {
+                        opacity: 1;
+                    }
+                ` : '';
+
                 var style = `
                     .th-modern-container {
                         position: fixed;
                         z-index: 100000;
                         font-family: 'Segoe UI', 'Roboto', system-ui, sans-serif;
-                        background: rgba(30, 30, 40, 0.85);
-                        backdrop-filter: blur(12px);
+                        background: rgba(30, 30, 40, ${opacity});
+                        ${blur}
                         border-radius: 40px;
                         padding: 8px 16px;
                         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
@@ -109,29 +177,7 @@ document.addEventListener('readystatechange', function () {
                     .th-reset:hover {
                         background: rgba(255,100,100,0.6);
                     }
-                    .th-tooltip {
-                        position: relative;
-                    }
-                    .th-tooltip::after {
-                        content: attr(data-tooltip);
-                        position: absolute;
-                        bottom: 100%;
-                        left: 50%;
-                        transform: translateX(-50%);
-                        background: #000;
-                        color: #fff;
-                        padding: 4px 8px;
-                        border-radius: 8px;
-                        font-size: 12px;
-                        white-space: nowrap;
-                        opacity: 0;
-                        pointer-events: none;
-                        transition: opacity 0.2s;
-                        margin-bottom: 8px;
-                    }
-                    .th-tooltip:hover::after {
-                        opacity: 1;
-                    }
+                    ${tooltipStyle}
                     .th-cover {
                         position: fixed;
                         top: 0;
@@ -145,7 +191,7 @@ document.addEventListener('readystatechange', function () {
                         z-index: 99999;
                         opacity: 0;
                         pointer-events: none;
-                        transition: opacity 0.2s;
+                        transition: opacity ${CONFIG.UI_FLASH_DURATION}ms;
                     }
                     .th-cover.show {
                         opacity: 1;
@@ -168,10 +214,10 @@ document.addEventListener('readystatechange', function () {
                 var html = `
                     <div class="th-modern-container" id="th-container">
                         <div class="th-speed-display" id="th-speed">x${speed}</div>
-                        <div class="th-btn th-tooltip" data-tooltip="Speed up (+5)" id="th-up">+</div>
-                        <div class="th-btn th-tooltip" data-tooltip="Slow down (-5)" id="th-down">-</div>
-                        <div class="th-btn th-tooltip" data-tooltip="Multiply by 2" id="th-x2">×2</div>
-                        <div class="th-btn th-tooltip" data-tooltip="Divide by 2" id="th-half">÷2</div>
+                        <div class="th-btn th-tooltip" data-tooltip="Speed up (+${CONFIG.BUTTON_STEP})" id="th-up">+</div>
+                        <div class="th-btn th-tooltip" data-tooltip="Slow down (-${CONFIG.BUTTON_STEP})" id="th-down">-</div>
+                        <div class="th-btn th-tooltip" data-tooltip="Multiply by ${CONFIG.BUTTON_X2}" id="th-x2">×${CONFIG.BUTTON_X2}</div>
+                        <div class="th-btn th-tooltip" data-tooltip="Divide by ${1/CONFIG.BUTTON_HALF}" id="th-half">÷${1/CONFIG.BUTTON_HALF}</div>
                         <div class="th-btn th-reset th-tooltip" data-tooltip="Reset to 1x" id="th-reset">⟳</div>
                     </div>
                     <div class="th-cover" id="th-cover">
@@ -205,8 +251,8 @@ document.addEventListener('readystatechange', function () {
                     container.style.top = pos.top + 'px';
                     container.style.right = 'auto';
                 } else {
-                    container.style.left = '20px';
-                    container.style.top = '20%';
+                    container.style.left = CONFIG.UI_POSITION.left;
+                    container.style.top = CONFIG.UI_POSITION.top;
                 }
                 container.addEventListener('mousedown', function (e) {
                     if (e.target !== container && !container.contains(e.target)) return;
@@ -243,7 +289,7 @@ document.addEventListener('readystatechange', function () {
                     speedDisplay.textContent = `x${newSpeed}`;
                     coverText.textContent = `x${newSpeed}`;
                     cover.classList.add('show');
-                    setTimeout(() => cover.classList.remove('show'), 300);
+                    setTimeout(() => cover.classList.remove('show'), CONFIG.UI_FLASH_DURATION);
                 }
 
                 // Button actions
@@ -252,26 +298,25 @@ document.addEventListener('readystatechange', function () {
                     var newSpeed;
                     switch (operation) {
                         case 'add':
-                            newSpeed = Math.max(5, Math.min(100, current + value));
+                            newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current + value));
                             break;
                         case 'multiply':
-                            newSpeed = Math.max(5, Math.min(100, current * value));
+                            newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current * value));
                             break;
                         case 'reset':
-                            newSpeed = 1;
+                            newSpeed = CONFIG.DEFAULT_SPEED;
                             break;
                         default: return;
                     }
                     timerContext.change(1 / newSpeed);
                 }
 
-                node.querySelector('#th-up').onclick = () => changeTime('add', 5);
-                node.querySelector('#th-down').onclick = () => changeTime('add', -5);
-                node.querySelector('#th-x2').onclick = () => changeTime('multiply', 2);
-                node.querySelector('#th-half').onclick = () => changeTime('multiply', 0.5);
+                node.querySelector('#th-up').onclick = () => changeTime('add', CONFIG.BUTTON_STEP);
+                node.querySelector('#th-down').onclick = () => changeTime('add', -CONFIG.BUTTON_STEP);
+                node.querySelector('#th-x2').onclick = () => changeTime('multiply', CONFIG.BUTTON_X2);
+                node.querySelector('#th-half').onclick = () => changeTime('multiply', CONFIG.BUTTON_HALF);
                 node.querySelector('#th-reset').onclick = () => changeTime('reset');
 
-                // Attach observer for UI updates
                 timerContext._uiUpdate = updateUI;
 
                 if (!global.isDOMLoaded) {
@@ -280,14 +325,14 @@ document.addEventListener('readystatechange', function () {
                             document.head.appendChild(stylenode);
                             document.body.appendChild(node);
                             global.isDOMRendered = true;
-                            console.log('Timer Hooker (modern UI) loaded');
+                            debug('Timer Hooker (modern UI) loaded');
                         }
                     });
                 } else {
                     document.head.appendChild(stylenode);
                     document.body.appendChild(node);
                     global.isDOMRendered = true;
-                    console.log('Timer Hooker (modern UI) loaded');
+                    debug('Timer Hooker (modern UI) loaded');
                 }
             },
             applyGlobalAction: function (timer) {
@@ -327,68 +372,74 @@ document.addEventListener('readystatechange', function () {
             },
             applyHooking: function () {
                 var _this = this;
-                eHookContext.hookReplace(window, 'setInterval', function (setInterval) {
-                    return _this.getHookedTimerFunction('interval', setInterval);
-                });
-                eHookContext.hookReplace(window, 'setTimeout', function (setTimeout) {
-                    return _this.getHookedTimerFunction('timeout', setTimeout);
-                });
-                eHookContext.hookBefore(window, 'clearInterval', function (method, args) {
-                    _this.redirectNewestId(args);
-                });
-                eHookContext.hookBefore(window, 'clearTimeout', function (method, args) {
-                    _this.redirectNewestId(args);
-                });
+                if (CONFIG.HOOK_TIMERS) {
+                    eHookContext.hookReplace(window, 'setInterval', function (setInterval) {
+                        return _this.getHookedTimerFunction('interval', setInterval);
+                    });
+                    eHookContext.hookReplace(window, 'setTimeout', function (setTimeout) {
+                        return _this.getHookedTimerFunction('timeout', setTimeout);
+                    });
+                    eHookContext.hookBefore(window, 'clearInterval', function (method, args) {
+                        _this.redirectNewestId(args);
+                    });
+                    eHookContext.hookBefore(window, 'clearTimeout', function (method, args) {
+                        _this.redirectNewestId(args);
+                    });
+                }
 
-                // Hook requestAnimationFrame
-                var originalRAF = window.requestAnimationFrame;
-                var originalCAF = window.cancelAnimationFrame;
-                var rafCallbacks = new Map();
-                var rafIdCounter = 0;
-                window.requestAnimationFrame = function (callback) {
-                    var id = ++rafIdCounter;
-                    var lastTime = timerContext._Date.now();
-                    var desiredDelay = 16 / timerContext._percentage;
-                    var nextTime = lastTime + desiredDelay;
-                    var wrapped = function (timestamp) {
-                        var now = timerContext._Date.now();
-                        if (now >= nextTime) {
-                            callback(timestamp);
-                            lastTime = now;
-                            nextTime = now + desiredDelay;
-                        } else {
-                            rafCallbacks.set(id, requestAnimationFrame(wrapped));
+                if (CONFIG.HOOK_RAF) {
+                    var originalRAF = window.requestAnimationFrame;
+                    var originalCAF = window.cancelAnimationFrame;
+                    var rafCallbacks = new Map();
+                    var rafIdCounter = 0;
+                    window.requestAnimationFrame = function (callback) {
+                        var id = ++rafIdCounter;
+                        var lastTime = timerContext._Date.now();
+                        var desiredDelay = 16 / timerContext._percentage;
+                        var nextTime = lastTime + desiredDelay;
+                        var wrapped = function (timestamp) {
+                            var now = timerContext._Date.now();
+                            if (now >= nextTime) {
+                                callback(timestamp);
+                                lastTime = now;
+                                nextTime = now + desiredDelay;
+                            } else {
+                                rafCallbacks.set(id, requestAnimationFrame(wrapped));
+                            }
+                        };
+                        var actualId = originalRAF.call(window, wrapped);
+                        rafCallbacks.set(id, actualId);
+                        return id;
+                    };
+                    window.cancelAnimationFrame = function (id) {
+                        var actualId = rafCallbacks.get(id);
+                        if (actualId) {
+                            originalCAF.call(window, actualId);
+                            rafCallbacks.delete(id);
                         }
                     };
-                    var actualId = originalRAF.call(window, wrapped);
-                    rafCallbacks.set(id, actualId);
-                    return id;
-                };
-                window.cancelAnimationFrame = function (id) {
-                    var actualId = rafCallbacks.get(id);
-                    if (actualId) {
-                        originalCAF.call(window, actualId);
-                        rafCallbacks.delete(id);
-                    }
-                };
-                eHookContext.hookedToString(originalRAF, window.requestAnimationFrame);
-                eHookContext.hookedToString(originalCAF, window.cancelAnimationFrame);
+                    eHookContext.hookedToString(originalRAF, window.requestAnimationFrame);
+                    eHookContext.hookedToString(originalCAF, window.cancelAnimationFrame);
+                }
 
-                var newFunc = this.getHookedDateConstructor();
-                eHookContext.hookClass(window, 'Date', newFunc, '_innerDate', ['now']);
-                Date.now = function () {
-                    return new Date().getTime();
-                };
-                eHookContext.hookedToString(timerContext._Date.now, Date.now);
+                if (CONFIG.HOOK_DATE) {
+                    var newFunc = this.getHookedDateConstructor();
+                    eHookContext.hookClass(window, 'Date', newFunc, '_innerDate', ['now']);
+                    Date.now = function () {
+                        return new Date().getTime();
+                    };
+                    eHookContext.hookedToString(timerContext._Date.now, Date.now);
 
-                var objToString = Object.prototype.toString;
-                Object.prototype.toString = function toString() {
-                    if (this instanceof timerContext._mDate) {
-                        return '[object Date]';
-                    }
-                    return objToString.call(this);
-                };
-                eHookContext.hookedToString(objToString, Object.prototype.toString);
+                    var objToString = Object.prototype.toString;
+                    Object.prototype.toString = function toString() {
+                        if (this instanceof timerContext._mDate) {
+                            return '[object Date]';
+                        }
+                        return objToString.call(this);
+                    };
+                    eHookContext.hookedToString(objToString, Object.prototype.toString);
+                }
+
                 eHookContext.hookedToString(timerContext._setInterval, setInterval);
                 eHookContext.hookedToString(timerContext._setTimeout, setTimeout);
                 eHookContext.hookedToString(timerContext._clearInterval, clearInterval);
@@ -481,23 +532,24 @@ document.addEventListener('readystatechange', function () {
                 addEventListener('keydown', function (e) {
                     // Arrow keys
                     if (e.target === document.body || e.target === document.documentElement || e.target.tagName !== 'INPUT') {
-                        let step = 0.1;
-                        if (e.shiftKey) step = 1;
-                        if (e.ctrlKey) step = 0.01;
+                        let step = CONFIG.ARROW_STEP;
+                        if (e.shiftKey) step = CONFIG.ARROW_SHIFT_STEP;
+                        if (e.ctrlKey) step = CONFIG.ARROW_CTRL_STEP;
                         if (e.key === 'ArrowUp') {
                             e.preventDefault();
                             var current = 1 / timerContext._percentage;
-                            var newSpeed = Math.max(0.1, Math.min(16, current + step));
+                            var newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current + step));
                             timer.change(1 / newSpeed);
                         } else if (e.key === 'ArrowDown') {
                             e.preventDefault();
                             var current = 1 / timerContext._percentage;
-                            var newSpeed = Math.max(0.1, Math.min(16, current - step));
+                            var newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current - step));
                             timer.change(1 / newSpeed);
                         }
                     }
-                    // Existing shortcuts (Ctrl+Alt+...)
-                    if (e.ctrlKey || e.altKey) {
+
+                    // Legacy shortcuts (Ctrl+Alt+...)
+                    if (CONFIG.ENABLE_LEGACY_SHORTCUTS && (e.ctrlKey || e.altKey)) {
                         const key = e.key;
                         switch (key) {
                             case '9': case '0':
@@ -519,25 +571,27 @@ document.addEventListener('readystatechange', function () {
                 });
             },
             percentageChangeHandler: function (percentage) {
-                for (var id in timerContext._intervalIds) {
-                    var idObj = timerContext._intervalIds[id];
-                    idObj.args[1] = Math.floor((idObj.originMS || 1) * percentage);
-                    timerContext._clearInterval.call(window, idObj.nowId);
-                    idObj.nowId = timerContext._setInterval.apply(window, idObj.args);
-                }
-                for (var id in timerContext._timeoutIds) {
-                    var idObj = timerContext._timeoutIds[id];
-                    var now = timerContext._Date.now();
-                    var exceptTime = idObj.exceptNextFireTime;
-                    var oldPercentage = idObj.oldPercentage;
-                    var time = exceptTime - now;
-                    if (time < 0) time = 0;
-                    var changedTime = Math.floor(percentage / oldPercentage * time);
-                    idObj.args[1] = changedTime;
-                    idObj.exceptNextFireTime = now + changedTime;
-                    idObj.oldPercentage = percentage;
-                    timerContext._clearTimeout.call(window, idObj.nowId);
-                    idObj.nowId = timerContext._setTimeout.apply(window, idObj.args);
+                if (CONFIG.HOOK_TIMERS) {
+                    for (var id in timerContext._intervalIds) {
+                        var idObj = timerContext._intervalIds[id];
+                        idObj.args[1] = Math.floor((idObj.originMS || 1) * percentage);
+                        timerContext._clearInterval.call(window, idObj.nowId);
+                        idObj.nowId = timerContext._setInterval.apply(window, idObj.args);
+                    }
+                    for (var id in timerContext._timeoutIds) {
+                        var idObj = timerContext._timeoutIds[id];
+                        var now = timerContext._Date.now();
+                        var exceptTime = idObj.exceptNextFireTime;
+                        var oldPercentage = idObj.oldPercentage;
+                        var time = exceptTime - now;
+                        if (time < 0) time = 0;
+                        var changedTime = Math.floor(percentage / oldPercentage * time);
+                        idObj.args[1] = changedTime;
+                        idObj.exceptNextFireTime = now + changedTime;
+                        idObj.oldPercentage = percentage;
+                        timerContext._clearTimeout.call(window, idObj.nowId);
+                        idObj.nowId = timerContext._setTimeout.apply(window, idObj.args);
+                    }
                 }
                 if (timerContext._uiUpdate) timerContext._uiUpdate(percentage);
             },
@@ -577,14 +631,15 @@ document.addEventListener('readystatechange', function () {
                 if (option && target && target instanceof Element && typeof key === 'string' && key.indexOf('on') >= 0) {
                     option.configurable = true;
                 }
-                if (target instanceof HTMLVideoElement && key === 'playbackRate') {
+                if (target instanceof HTMLVideoElement && key === 'playbackRate' && CONFIG.VIDEO_FORCE_RATE) {
                     option.configurable = true;
-                    console.warn('[Timer Hook]', 'Overriding video playbackRate');
+                    debug('Overriding video playbackRate');
                     key = 'playbackRate_hooked';
                 }
                 return [target, key, option];
             },
             changePlaybackRate: function (ele, rate) {
+                if (!CONFIG.VIDEO_FORCE_RATE) return;
                 var descriptor = Object.getOwnPropertyDescriptor(ele, 'playbackRate');
                 if (descriptor && descriptor.configurable && descriptor.set === this.noopSetter) {
                     delete ele.playbackRate;
@@ -599,6 +654,7 @@ document.addEventListener('readystatechange', function () {
             },
             noopSetter: function() {},
             watchForVideos: function() {
+                if (!CONFIG.VIDEO_OBSERVER) return;
                 var observer = new MutationObserver(function(mutations) {
                     for (var mutation of mutations) {
                         for (var node of mutation.addedNodes) {
@@ -672,7 +728,7 @@ document.addEventListener('readystatechange', function () {
                 _intervalIds: {},
                 _timeoutIds: {},
                 _auoUniqueId: 1,
-                __percentage: 1.0,
+                __percentage: 1 / CONFIG.DEFAULT_SPEED,
                 _setInterval: window['setInterval'],
                 _clearInterval: window['clearInterval'],
                 _clearTimeout: window['clearTimeout'],
@@ -715,14 +771,14 @@ document.addEventListener('readystatechange', function () {
                     });
 
                     if (!normalUtil.isInIframe()) {
-                        console.log('[TimerHooker]', 'Loading outer window...');
+                        debug('Loading outer window...');
                         h.applyUI();
                         h.applyGlobalAction(timerContext);
                         h.registerShortcutKeys(timerContext);
                     } else {
-                        console.log('[TimerHooker]', 'Loading inner window...');
+                        debug('Loading inner window...');
                         normalUtil.listenParentEvent(function (percentage) {
-                            console.log('[TimerHooker]', 'Inner changed to', percentage);
+                            debug('Inner changed to', percentage);
                             this.change(percentage);
                         }.bind(this));
                     }
@@ -737,7 +793,7 @@ document.addEventListener('readystatechange', function () {
                 changeVideoSpeed: function (forceAll = false) {
                     var h = helper(eHookContext, this, util);
                     var rate = 1 / this._percentage;
-                    rate = Math.min(16, Math.max(0.065, rate));
+                    rate = Math.min(CONFIG.MAX_SPEED, Math.max(CONFIG.MIN_SPEED, rate));
                     var videos = querySelectorAll(document, 'video', true);
                     for (var i = 0; i < videos.length; i++) {
                         h.changePlaybackRate(videos[i], rate);
