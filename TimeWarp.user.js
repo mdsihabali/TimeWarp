@@ -1,13 +1,10 @@
 // ==UserScript==
-// @name             Timer Hooker | Modern UI | Arrow Keys | Configurable
-// @name:en         TimerHooker
-// @namespace       https://gitee.com/HGJing/everthing-hook/
-// @version         2.0
-// @description     Control timer speeds, skip video ads, speed up/down videos. Modern UI, arrow keys, fully configurable.
-// @description:en  Hook timer functions to change speed. Modern UI, arrow keys, configurable.
+// @name            TimeWarp
+// @version         2.2
+// @description     Control timer speeds, skip video ads, speed up/down videos. Modern UI, arrow keys, fully configurable. Hook timer functions to change speed. Landscape/portrait, left/right multiply/divide by 2, settings panel with import/export and reset, tap outside to close.
 // @include         *
 // @require         https://greasyfork.org/scripts/372672-everything-hook/code/Everything-Hook.js?version=881251
-// @author          Cangshi (enhanced by community)
+// @author          SihabX (modified)
 // @match           http://*/*
 // @run-at          document-start
 // @grant           none
@@ -31,9 +28,12 @@ const CONFIG = {
     BUTTON_HALF: 0.5,    // Divide by 2 button factor
 
     // Keyboard arrow keys behavior
+    USE_ARROWS: false,   // Enable arrow keys (up/down/left/right) to control speed
     ARROW_STEP: 0.1,     // Base step for arrow up/down
     ARROW_SHIFT_STEP: 1, // Step when Shift is held
     ARROW_CTRL_STEP: 0.01, // Step when Ctrl is held
+
+    // Left/Right arrow keys: Left = multiply by 2, Right = divide by 2 (fixed)
 
     // Keyboard shortcuts (Ctrl/Alt + other keys)
     ENABLE_LEGACY_SHORTCUTS: true, // Enable Ctrl+Alt+[=/-/0/9] shortcuts
@@ -44,6 +44,7 @@ const CONFIG = {
     UI_TRANSPARENCY: 0.85,  // Background opacity (0 to 1)
     UI_SHOW_TOOLTIPS: true, // Show tooltips on hover
     UI_FLASH_DURATION: 300, // Flash overlay duration (ms)
+    LANDSCAPE_MODE: true,   // true = horizontal layout, false = vertical (portrait)
 
     // Video handling
     VIDEO_FORCE_RATE: true,  // Force video playbackRate to match speed
@@ -54,9 +55,15 @@ const CONFIG = {
     HOOK_RAF: true,          // Hook requestAnimationFrame
     HOOK_DATE: true,         // Hook Date constructor
 
+    // Settings panel
+    ENABLE_SETTINGS_PANEL: true, // Show settings button in UI
+
     // Debug
     DEBUG: false,            // Log debug messages to console
 };
+
+// Base configuration backup (for reset)
+const BASE_CONFIG = JSON.parse(JSON.stringify(CONFIG));
 
 /**
  * ================= END OF CONFIGURATION =================
@@ -79,262 +86,571 @@ document.addEventListener('readystatechange', function () {
 
     var helper = function (eHookContext, timerContext, util) {
         const RATE_SYM = Symbol('timerhooker_rate');
+        let currentUIContainer = null;
+        let currentStyleNode = null;
+        let currentNode = null;
 
-        return {
-            applyUI: function () {
-                // CSS (uses CONFIG values)
-                var blur = CONFIG.UI_BLUR ? 'backdrop-filter: blur(12px);' : '';
-                var opacity = CONFIG.UI_TRANSPARENCY;
-                var tooltipStyle = CONFIG.UI_SHOW_TOOLTIPS ? `
-                    .th-tooltip {
-                        position: relative;
-                    }
-                    .th-tooltip::after {
-                        content: attr(data-tooltip);
-                        position: absolute;
-                        bottom: 100%;
-                        left: 50%;
-                        transform: translateX(-50%);
-                        background: #000;
-                        color: #fff;
-                        padding: 4px 8px;
-                        border-radius: 8px;
-                        font-size: 12px;
-                        white-space: nowrap;
-                        opacity: 0;
-                        pointer-events: none;
-                        transition: opacity 0.2s;
-                        margin-bottom: 8px;
-                    }
-                    .th-tooltip:hover::after {
-                        opacity: 1;
-                    }
-                ` : '';
+        // Helper to rebuild UI when settings change
+        function rebuildUI() {
+            if (currentNode && currentNode.parentNode) {
+                currentNode.parentNode.removeChild(currentNode);
+            }
+            if (currentStyleNode && currentStyleNode.parentNode) {
+                currentStyleNode.parentNode.removeChild(currentStyleNode);
+            }
+            applyUI();
+        }
 
-                var style = `
-                    .th-modern-container {
-                        position: fixed;
-                        z-index: 100000;
-                        font-family: 'Segoe UI', 'Roboto', system-ui, sans-serif;
-                        background: rgba(30, 30, 40, ${opacity});
-                        ${blur}
-                        border-radius: 40px;
-                        padding: 8px 16px;
-                        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-                        border: 1px solid rgba(255,255,255,0.2);
-                        user-select: none;
-                        cursor: grab;
-                        transition: transform 0.2s, box-shadow 0.2s;
-                        display: flex;
-                        gap: 12px;
-                        align-items: center;
-                    }
-                    .th-modern-container.dragging {
-                        cursor: grabbing;
-                        opacity: 0.9;
-                    }
-                    .th-modern-container:hover {
-                        box-shadow: 0 6px 24px rgba(0,0,0,0.4);
-                    }
-                    .th-speed-display {
-                        background: rgba(0,0,0,0.6);
-                        border-radius: 32px;
-                        padding: 6px 14px;
-                        color: #fff;
-                        font-weight: 600;
-                        font-size: 1.2rem;
-                        letter-spacing: 1px;
-                        min-width: 80px;
-                        text-align: center;
-                        backdrop-filter: blur(4px);
+        function applyUI() {
+            // CSS (uses CONFIG values)
+            var blur = CONFIG.UI_BLUR ? 'backdrop-filter: blur(12px);' : '';
+            var opacity = CONFIG.UI_TRANSPARENCY;
+            var tooltipStyle = CONFIG.UI_SHOW_TOOLTIPS ? `
+                .th-tooltip {
+                    position: relative;
+                }
+                .th-tooltip::after {
+                    content: attr(data-tooltip);
+                    position: absolute;
+                    bottom: 100%;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: #000;
+                    color: #fff;
+                    padding: 4px 8px;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    white-space: nowrap;
+                    opacity: 0;
+                    pointer-events: none;
+                    transition: opacity 0.2s;
+                    margin-bottom: 8px;
+                }
+                .th-tooltip:hover::after {
+                    opacity: 1;
+                }
+            ` : '';
+
+            // Orientation-specific styles
+            var orientationStyle = CONFIG.LANDSCAPE_MODE ?
+                'display: flex; flex-direction: row; gap: 12px; align-items: center;' :
+                'display: flex; flex-direction: column; gap: 8px; align-items: center; padding: 12px; min-width: 70px; width: auto;';
+
+            var style = `
+                .th-modern-container {
+                    position: fixed;
+                    z-index: 100000;
+                    font-family: 'Segoe UI', 'Roboto', system-ui, sans-serif;
+                    background: rgba(30, 30, 40, ${opacity});
+                    ${blur}
+                    border-radius: 40px;
+                    padding: 8px 16px;
+                    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+                    border: 1px solid rgba(255,255,255,0.2);
+                    user-select: none;
+                    cursor: grab;
+                    transition: transform 0.2s, box-shadow 0.2s;
+                    ${orientationStyle}
+                }
+                .th-modern-container.dragging {
+                    cursor: grabbing;
+                    opacity: 0.9;
+                }
+                .th-modern-container:hover {
+                    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+                }
+                .th-speed-display {
+                    background: rgba(0,0,0,0.6);
+                    border-radius: 32px;
+                    padding: 6px 14px;
+                    color: #fff;
+                    font-weight: 600;
+                    font-size: 1.2rem;
+                    letter-spacing: 1px;
+                    min-width: 80px;
+                    text-align: center;
+                    backdrop-filter: blur(4px);
+                }
+                .th-btn {
+                    background: rgba(255,255,255,0.15);
+                    border: none;
+                    border-radius: 32px;
+                    width: 36px;
+                    height: 36px;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    color: white;
+                    font-size: 1.2rem;
+                    font-weight: bold;
+                    transition: all 0.2s;
+                    backdrop-filter: blur(4px);
+                }
+                .th-btn:hover {
+                    background: rgba(255,255,255,0.3);
+                    transform: scale(1.05);
+                }
+                .th-btn:active {
+                    transform: scale(0.95);
+                }
+                .th-reset {
+                    background: rgba(255,100,100,0.3);
+                }
+                .th-reset:hover {
+                    background: rgba(255,100,100,0.6);
+                }
+                .th-settings {
+                    background: rgba(100,100,255,0.3);
+                }
+                .th-settings:hover {
+                    background: rgba(100,100,255,0.6);
+                }
+                ${tooltipStyle}
+                .th-cover {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0,0,0,0.6);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 99999;
+                    opacity: 0;
+                    pointer-events: none;
+                    transition: opacity ${CONFIG.UI_FLASH_DURATION}ms;
+                }
+                .th-cover.show {
+                    opacity: 1;
+                    pointer-events: none;
+                }
+                .th-cover span {
+                    background: #fff;
+                    color: #000;
+                    font-size: 3rem;
+                    font-weight: bold;
+                    padding: 24px 48px;
+                    border-radius: 60px;
+                    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+                }
+                /* Settings Panel Modal - Device Friendly */
+                .th-settings-modal {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0,0,0,0.8);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 100001;
+                    font-family: 'Segoe UI', 'Roboto', sans-serif;
+                    backdrop-filter: blur(4px);
+                }
+                .th-settings-panel {
+                    background: rgba(30,30,40,0.95);
+                    backdrop-filter: blur(12px);
+                    border-radius: 24px;
+                    padding: 20px;
+                    width: 90%;
+                    max-width: 500px;
+                    max-height: 85%;
+                    overflow-y: auto;
+                    color: white;
+                    border: 1px solid rgba(255,255,255,0.2);
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+                    position: relative;
+                }
+                .th-settings-panel h3 {
+                    margin-top: 0;
+                    text-align: center;
+                    font-size: 1.4rem;
+                }
+                .th-settings-close {
+                    position: absolute;
+                    top: 12px;
+                    right: 16px;
+                    background: #ff4444;
+                    color: white;
+                    border: none;
+                    border-radius: 50%;
+                    width: 32px;
+                    height: 32px;
+                    font-size: 18px;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: 0.2s;
+                    z-index: 10;
+                }
+                .th-settings-close:hover {
+                    background: #ff0000;
+                    transform: scale(1.1);
+                }
+                .th-settings-panel label {
+                    display: block;
+                    margin-top: 12px;
+                    font-size: 0.9rem;
+                }
+                .th-settings-panel input, .th-settings-panel select {
+                    width: 100%;
+                    padding: 8px;
+                    margin-top: 4px;
+                    border-radius: 12px;
+                    border: none;
+                    background: rgba(255,255,255,0.2);
+                    color: white;
+                    font-size: 0.9rem;
+                    box-sizing: border-box;
+                }
+                .th-settings-panel button {
+                    margin-top: 16px;
+                    margin-right: 8px;
+                    padding: 8px 16px;
+                    border-radius: 40px;
+                    border: none;
+                    background: rgba(255,255,255,0.2);
+                    color: white;
+                    cursor: pointer;
+                    font-size: 0.9rem;
+                }
+                .th-settings-panel button:hover {
+                    background: rgba(255,255,255,0.4);
+                }
+                .th-settings-panel .button-group {
+                    display: flex;
+                    flex-wrap: wrap;
+                    justify-content: flex-end;
+                    margin-top: 20px;
+                    gap: 8px;
+                }
+                @media (max-width: 600px) {
+                    .th-settings-panel {
+                        padding: 16px;
+                        width: 95%;
                     }
                     .th-btn {
-                        background: rgba(255,255,255,0.15);
-                        border: none;
-                        border-radius: 32px;
-                        width: 36px;
-                        height: 36px;
-                        display: inline-flex;
-                        align-items: center;
-                        justify-content: center;
-                        cursor: pointer;
-                        color: white;
-                        font-size: 1.2rem;
-                        font-weight: bold;
-                        transition: all 0.2s;
-                        backdrop-filter: blur(4px);
+                        width: 32px;
+                        height: 32px;
+                        font-size: 1rem;
                     }
-                    .th-btn:hover {
-                        background: rgba(255,255,255,0.3);
-                        transform: scale(1.05);
+                    .th-speed-display {
+                        min-width: 60px;
+                        font-size: 1rem;
+                        padding: 4px 10px;
                     }
-                    .th-btn:active {
-                        transform: scale(0.95);
+                    .th-modern-container {
+                        padding: 6px 12px;
                     }
-                    .th-reset {
-                        background: rgba(255,100,100,0.3);
-                    }
-                    .th-reset:hover {
-                        background: rgba(255,100,100,0.6);
-                    }
-                    ${tooltipStyle}
-                    .th-cover {
-                        position: fixed;
-                        top: 0;
-                        left: 0;
-                        width: 100%;
-                        height: 100%;
-                        background: rgba(0,0,0,0.6);
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        z-index: 99999;
-                        opacity: 0;
-                        pointer-events: none;
-                        transition: opacity ${CONFIG.UI_FLASH_DURATION}ms;
-                    }
-                    .th-cover.show {
-                        opacity: 1;
-                        pointer-events: none;
-                    }
-                    .th-cover span {
-                        background: #fff;
-                        color: #000;
-                        font-size: 3rem;
-                        font-weight: bold;
-                        padding: 24px 48px;
-                        border-radius: 60px;
-                        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-                    }
-                `;
+                }
+            `;
 
-                var displayNum = (1 / timerContext._percentage).toFixed(2);
-                var speed = displayNum;
+            var displayNum = (1 / timerContext._percentage).toFixed(2);
+            var speed = displayNum;
 
-                var html = `
-                    <div class="th-modern-container" id="th-container">
-                        <div class="th-speed-display" id="th-speed">x${speed}</div>
-                        <div class="th-btn th-tooltip" data-tooltip="Speed up (+${CONFIG.BUTTON_STEP})" id="th-up">+</div>
-                        <div class="th-btn th-tooltip" data-tooltip="Slow down (-${CONFIG.BUTTON_STEP})" id="th-down">-</div>
-                        <div class="th-btn th-tooltip" data-tooltip="Multiply by ${CONFIG.BUTTON_X2}" id="th-x2">×${CONFIG.BUTTON_X2}</div>
-                        <div class="th-btn th-tooltip" data-tooltip="Divide by ${1/CONFIG.BUTTON_HALF}" id="th-half">÷${1/CONFIG.BUTTON_HALF}</div>
-                        <div class="th-btn th-reset th-tooltip" data-tooltip="Reset to 1x" id="th-reset">⟳</div>
-                    </div>
-                    <div class="th-cover" id="th-cover">
-                        <span id="th-cover-text">x${speed}</span>
-                    </div>
-                `;
+            var settingsBtnHtml = CONFIG.ENABLE_SETTINGS_PANEL ? `
+                <div class="th-btn th-settings th-tooltip" data-tooltip="Settings" id="th-settings">⚙</div>
+            ` : '';
 
-                var stylenode = document.createElement('style');
-                stylenode.setAttribute("type", "text/css");
-                if (stylenode.styleSheet) {
-                    stylenode.styleSheet.cssText = style;
+            var html = `
+                <div class="th-modern-container" id="th-container">
+                    <div class="th-speed-display" id="th-speed">x${speed}</div>
+                    <div class="th-btn th-tooltip" data-tooltip="Speed up (+${CONFIG.BUTTON_STEP})" id="th-up">+</div>
+                    <div class="th-btn th-tooltip" data-tooltip="Slow down (-${CONFIG.BUTTON_STEP})" id="th-down">-</div>
+                    <div class="th-btn th-tooltip" data-tooltip="Multiply by ${CONFIG.BUTTON_X2}" id="th-x2">×${CONFIG.BUTTON_X2}</div>
+                    <div class="th-btn th-tooltip" data-tooltip="Divide by ${1/CONFIG.BUTTON_HALF}" id="th-half">÷${1/CONFIG.BUTTON_HALF}</div>
+                    <div class="th-btn th-reset th-tooltip" data-tooltip="Reset to 1x" id="th-reset">⟳</div>
+                    ${settingsBtnHtml}
+                </div>
+                <div class="th-cover" id="th-cover">
+                    <span id="th-cover-text">x${speed}</span>
+                </div>
+            `;
+
+            var stylenode = document.createElement('style');
+            stylenode.setAttribute("type", "text/css");
+            if (stylenode.styleSheet) {
+                stylenode.styleSheet.cssText = style;
+            } else {
+                var cssText = document.createTextNode(style);
+                stylenode.appendChild(cssText);
+            }
+
+            var node = document.createElement('div');
+            node.innerHTML = html;
+
+            var container = node.querySelector('#th-container');
+            var speedDisplay = node.querySelector('#th-speed');
+            var cover = node.querySelector('#th-cover');
+            var coverText = node.querySelector('#th-cover-text');
+
+            // Draggable
+            var isDragging = false, dragStartX, dragStartY, startLeft, startTop;
+            var savedPos = localStorage.getItem('timerHookerPos');
+            if (savedPos) {
+                var pos = JSON.parse(savedPos);
+                container.style.left = pos.left + 'px';
+                container.style.top = pos.top + 'px';
+                container.style.right = 'auto';
+            } else {
+                container.style.left = CONFIG.UI_POSITION.left;
+                container.style.top = CONFIG.UI_POSITION.top;
+            }
+            container.addEventListener('mousedown', function (e) {
+                if (e.target !== container && !container.contains(e.target)) return;
+                isDragging = true;
+                container.classList.add('dragging');
+                dragStartX = e.clientX;
+                dragStartY = e.clientY;
+                startLeft = parseInt(container.style.left) || 20;
+                startTop = parseInt(container.style.top) || (window.innerHeight * 0.2);
+                e.preventDefault();
+            });
+            window.addEventListener('mousemove', function (e) {
+                if (!isDragging) return;
+                var newLeft = startLeft + (e.clientX - dragStartX);
+                var newTop = startTop + (e.clientY - dragStartY);
+                container.style.left = newLeft + 'px';
+                container.style.top = newTop + 'px';
+                container.style.right = 'auto';
+            });
+            window.addEventListener('mouseup', function () {
+                if (isDragging) {
+                    isDragging = false;
+                    container.classList.remove('dragging');
+                    localStorage.setItem('timerHookerPos', JSON.stringify({
+                        left: parseInt(container.style.left),
+                        top: parseInt(container.style.top)
+                    }));
+                }
+            });
+
+            // Update UI function
+            function updateUI(percentage) {
+                var newSpeed = (1 / percentage).toFixed(2);
+                speedDisplay.textContent = `x${newSpeed}`;
+                coverText.textContent = `x${newSpeed}`;
+                cover.classList.add('show');
+                setTimeout(() => cover.classList.remove('show'), CONFIG.UI_FLASH_DURATION);
+            }
+
+            // Button actions
+            function changeTime(operation, value) {
+                var current = 1 / timerContext._percentage;
+                var newSpeed;
+                switch (operation) {
+                    case 'add':
+                        newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current + value));
+                        break;
+                    case 'multiply':
+                        newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current * value));
+                        break;
+                    case 'reset':
+                        newSpeed = CONFIG.DEFAULT_SPEED;
+                        break;
+                    default: return;
+                }
+                timerContext.change(1 / newSpeed);
+            }
+
+            node.querySelector('#th-up').onclick = () => changeTime('add', CONFIG.BUTTON_STEP);
+            node.querySelector('#th-down').onclick = () => changeTime('add', -CONFIG.BUTTON_STEP);
+            node.querySelector('#th-x2').onclick = () => changeTime('multiply', CONFIG.BUTTON_X2);
+            node.querySelector('#th-half').onclick = () => changeTime('multiply', CONFIG.BUTTON_HALF);
+            node.querySelector('#th-reset').onclick = () => changeTime('reset');
+
+            if (CONFIG.ENABLE_SETTINGS_PANEL) {
+                node.querySelector('#th-settings').onclick = () => showSettingsModal(rebuildUI);
+            }
+
+            timerContext._uiUpdate = updateUI;
+
+            // Save references for removal later
+            currentUIContainer = container;
+            currentNode = node;
+            currentStyleNode = stylenode;
+
+            if (!global.isDOMLoaded) {
+                document.addEventListener('readystatechange', function () {
+                    if ((document.readyState === "interactive" || document.readyState === "complete") && !global.isDOMRendered) {
+                        document.head.appendChild(stylenode);
+                        document.body.appendChild(node);
+                        global.isDOMRendered = true;
+                        debug('Timer Hooker (modern UI) loaded');
+                    }
+                });
+            } else {
+                document.head.appendChild(stylenode);
+                document.body.appendChild(node);
+                global.isDOMRendered = true;
+                debug('Timer Hooker (modern UI) loaded');
+            }
+        }
+
+        // Settings modal with red close button and tap outside to close
+        function showSettingsModal(onSaveCallback) {
+            // Create modal overlay
+            const modal = document.createElement('div');
+            modal.className = 'th-settings-modal';
+            const panel = document.createElement('div');
+            panel.className = 'th-settings-panel';
+
+            // Generate form from CONFIG (skip functions, handle special cases)
+            let formHtml = `<h3>⚙ TimeWarp Settings</h3>`;
+            for (let [key, value] of Object.entries(CONFIG)) {
+                if (typeof value === 'function') continue;
+                let inputType = 'text';
+                if (typeof value === 'boolean') inputType = 'checkbox';
+                if (typeof value === 'number') inputType = 'number';
+                if (key === 'UI_POSITION') {
+                    formHtml += `<label>${key} (JSON object e.g. {"left":"20px","top":"20%"})<input type="text" id="cfg_${key}" value='${JSON.stringify(value)}' placeholder='{"left":"20px","top":"20%"}'></label>`;
+                    continue;
+                }
+                if (inputType === 'checkbox') {
+                    formHtml += `<label><input type="checkbox" id="cfg_${key}" ${value ? 'checked' : ''}> ${key}</label>`;
                 } else {
-                    var cssText = document.createTextNode(style);
-                    stylenode.appendChild(cssText);
+                    formHtml += `<label>${key}<input type="${inputType}" id="cfg_${key}" value="${value}" step="${typeof value === 'number' ? 'any' : ''}"></label>`;
                 }
+            }
+            formHtml += `<div class="button-group">
+                            <button id="th-settings-import">📂 Import JSON</button>
+                            <button id="th-settings-export">📤 Export JSON</button>
+                            <button id="th-settings-reset" style="background: rgba(255,100,100,0.5);">⟳ Reset to Base</button>
+                            <button id="th-settings-save" style="background: #4CAF50;">💾 Save</button>
+                         </div>`;
 
-                var node = document.createElement('div');
-                node.innerHTML = html;
+            // Build panel content with close button at top
+            panel.innerHTML = `<button class="th-settings-close" title="Close">✕</button>${formHtml}`;
+            modal.appendChild(panel);
+            document.body.appendChild(modal);
 
-                var container = node.querySelector('#th-container');
-                var speedDisplay = node.querySelector('#th-speed');
-                var cover = node.querySelector('#th-cover');
-                var coverText = node.querySelector('#th-cover-text');
+            // Close button functionality
+            const closeBtn = panel.querySelector('.th-settings-close');
+            if (closeBtn) {
+                closeBtn.onclick = () => modal.remove();
+            }
 
-                // Draggable
-                var isDragging = false, dragStartX, dragStartY, startLeft, startTop;
-                var savedPos = localStorage.getItem('timerHookerPos');
-                if (savedPos) {
-                    var pos = JSON.parse(savedPos);
-                    container.style.left = pos.left + 'px';
-                    container.style.top = pos.top + 'px';
-                    container.style.right = 'auto';
-                } else {
-                    container.style.left = CONFIG.UI_POSITION.left;
-                    container.style.top = CONFIG.UI_POSITION.top;
+            // Tap outside to close
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    modal.remove();
                 }
-                container.addEventListener('mousedown', function (e) {
-                    if (e.target !== container && !container.contains(e.target)) return;
-                    isDragging = true;
-                    container.classList.add('dragging');
-                    dragStartX = e.clientX;
-                    dragStartY = e.clientY;
-                    startLeft = parseInt(container.style.left) || 20;
-                    startTop = parseInt(container.style.top) || (window.innerHeight * 0.2);
-                    e.preventDefault();
-                });
-                window.addEventListener('mousemove', function (e) {
-                    if (!isDragging) return;
-                    var newLeft = startLeft + (e.clientX - dragStartX);
-                    var newTop = startTop + (e.clientY - dragStartY);
-                    container.style.left = newLeft + 'px';
-                    container.style.top = newTop + 'px';
-                    container.style.right = 'auto';
-                });
-                window.addEventListener('mouseup', function () {
-                    if (isDragging) {
-                        isDragging = false;
-                        container.classList.remove('dragging');
-                        localStorage.setItem('timerHookerPos', JSON.stringify({
-                            left: parseInt(container.style.left),
-                            top: parseInt(container.style.top)
-                        }));
-                    }
-                });
+            });
 
-                // Update UI function
-                function updateUI(percentage) {
-                    var newSpeed = (1 / percentage).toFixed(2);
-                    speedDisplay.textContent = `x${newSpeed}`;
-                    coverText.textContent = `x${newSpeed}`;
-                    cover.classList.add('show');
-                    setTimeout(() => cover.classList.remove('show'), CONFIG.UI_FLASH_DURATION);
-                }
-
-                // Button actions
-                function changeTime(operation, value) {
-                    var current = 1 / timerContext._percentage;
-                    var newSpeed;
-                    switch (operation) {
-                        case 'add':
-                            newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current + value));
-                            break;
-                        case 'multiply':
-                            newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current * value));
-                            break;
-                        case 'reset':
-                            newSpeed = CONFIG.DEFAULT_SPEED;
-                            break;
-                        default: return;
-                    }
-                    timerContext.change(1 / newSpeed);
-                }
-
-                node.querySelector('#th-up').onclick = () => changeTime('add', CONFIG.BUTTON_STEP);
-                node.querySelector('#th-down').onclick = () => changeTime('add', -CONFIG.BUTTON_STEP);
-                node.querySelector('#th-x2').onclick = () => changeTime('multiply', CONFIG.BUTTON_X2);
-                node.querySelector('#th-half').onclick = () => changeTime('multiply', CONFIG.BUTTON_HALF);
-                node.querySelector('#th-reset').onclick = () => changeTime('reset');
-
-                timerContext._uiUpdate = updateUI;
-
-                if (!global.isDOMLoaded) {
-                    document.addEventListener('readystatechange', function () {
-                        if ((document.readyState === "interactive" || document.readyState === "complete") && !global.isDOMRendered) {
-                            document.head.appendChild(stylenode);
-                            document.body.appendChild(node);
-                            global.isDOMRendered = true;
-                            debug('Timer Hooker (modern UI) loaded');
+            // Helper: update CONFIG from form
+            function saveSettings() {
+                for (let [key, value] of Object.entries(CONFIG)) {
+                    if (typeof value === 'function') continue;
+                    const input = document.getElementById(`cfg_${key}`);
+                    if (!input) continue;
+                    let newVal;
+                    if (input.type === 'checkbox') {
+                        newVal = input.checked;
+                    } else if (input.type === 'number') {
+                        newVal = parseFloat(input.value);
+                    } else {
+                        if (key === 'UI_POSITION') {
+                            try {
+                                newVal = JSON.parse(input.value);
+                            } catch(e) {
+                                newVal = CONFIG.UI_POSITION;
+                            }
+                        } else {
+                            newVal = input.value;
                         }
-                    });
-                } else {
-                    document.head.appendChild(stylenode);
-                    document.body.appendChild(node);
-                    global.isDOMRendered = true;
-                    debug('Timer Hooker (modern UI) loaded');
+                    }
+                    CONFIG[key] = newVal;
                 }
-            },
+                // Reapply video speed if needed
+                if (timerContext.changeVideoSpeed) timerContext.changeVideoSpeed(true);
+                if (onSaveCallback) onSaveCallback();
+            }
+
+            function resetToBase() {
+                for (let key of Object.keys(BASE_CONFIG)) {
+                    if (typeof CONFIG[key] !== 'function') {
+                        CONFIG[key] = JSON.parse(JSON.stringify(BASE_CONFIG[key]));
+                    }
+                }
+                // Refresh form fields
+                for (let [key, value] of Object.entries(CONFIG)) {
+                    const inp = document.getElementById(`cfg_${key}`);
+                    if (inp) {
+                        if (inp.type === 'checkbox') inp.checked = value;
+                        else if (key === 'UI_POSITION') inp.value = JSON.stringify(value);
+                        else inp.value = value;
+                    }
+                }
+                alert('Settings reset to base configuration. Click Save to apply.');
+            }
+
+            function importJSON() {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'application/json';
+                input.onchange = e => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = ev => {
+                        try {
+                            const imported = JSON.parse(ev.target.result);
+                            for (let key of Object.keys(imported)) {
+                                if (CONFIG.hasOwnProperty(key)) {
+                                    CONFIG[key] = imported[key];
+                                }
+                            }
+                            // refresh form
+                            for (let [key, value] of Object.entries(CONFIG)) {
+                                const inp = document.getElementById(`cfg_${key}`);
+                                if (inp) {
+                                    if (inp.type === 'checkbox') inp.checked = value;
+                                    else if (key === 'UI_POSITION') inp.value = JSON.stringify(value);
+                                    else inp.value = value;
+                                }
+                            }
+                            alert('Configuration imported. Click Save to apply.');
+                        } catch (err) {
+                            alert('Invalid JSON file');
+                        }
+                    };
+                    reader.readAsText(file);
+                };
+                input.click();
+            }
+
+            function exportJSON() {
+                const exportConfig = {};
+                for (let key in CONFIG) {
+                    if (typeof CONFIG[key] !== 'function') {
+                        exportConfig[key] = CONFIG[key];
+                    }
+                }
+                const dataStr = JSON.stringify(exportConfig, null, 2);
+                const blob = new Blob([dataStr], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'timewarp_config.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            }
+
+            document.getElementById('th-settings-save').onclick = () => {
+                saveSettings();
+                modal.remove();
+            };
+            document.getElementById('th-settings-import').onclick = importJSON;
+            document.getElementById('th-settings-export').onclick = exportJSON;
+            document.getElementById('th-settings-reset').onclick = resetToBase;
+        }
+
+        return {
+            applyUI,
             applyGlobalAction: function (timer) {
                 timer.changeTime = function (anum, cnum, isa, isr) {
                     if (isr) {
@@ -530,8 +846,8 @@ document.addEventListener('readystatechange', function () {
             },
             registerShortcutKeys: function (timer) {
                 addEventListener('keydown', function (e) {
-                    // Arrow keys
-                    if (e.target === document.body || e.target === document.documentElement || e.target.tagName !== 'INPUT') {
+                    // Arrow keys only if enabled
+                    if (CONFIG.USE_ARROWS && (e.target === document.body || e.target === document.documentElement || e.target.tagName !== 'INPUT')) {
                         let step = CONFIG.ARROW_STEP;
                         if (e.shiftKey) step = CONFIG.ARROW_SHIFT_STEP;
                         if (e.ctrlKey) step = CONFIG.ARROW_CTRL_STEP;
@@ -544,6 +860,18 @@ document.addEventListener('readystatechange', function () {
                             e.preventDefault();
                             var current = 1 / timerContext._percentage;
                             var newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current - step));
+                            timer.change(1 / newSpeed);
+                        } else if (e.key === 'ArrowLeft') {
+                            e.preventDefault();
+                            // Left arrow = multiply by 2
+                            var current = 1 / timerContext._percentage;
+                            var newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current * 2));
+                            timer.change(1 / newSpeed);
+                        } else if (e.key === 'ArrowRight') {
+                            e.preventDefault();
+                            // Right arrow = divide by 2
+                            var current = 1 / timerContext._percentage;
+                            var newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current / 2));
                             timer.change(1 / newSpeed);
                         }
                     }
