@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name            TimeWarp
-// @version         2.2
-// @description     Control timer speeds, skip video ads, speed up/down videos. Modern UI, arrow keys, fully configurable. Hook timer functions to change speed. Landscape/portrait, left/right multiply/divide by 2, settings panel with import/export and reset, tap outside to close.
+// @version         2.7
+// @description     Control timer speeds, skip video ads, speed up/down videos. Modern UI, arrow keys, fully configurable. Hook timer functions to change speed. Landscape/portrait, left/right multiply/divide by 2, settings panel with import/export/reset, tap outside to close, MAIN PANEL size adjustable via settings (no resize handle).
 // @include         *
 // @require         https://greasyfork.org/scripts/372672-everything-hook/code/Everything-Hook.js?version=881251
-// @author          SihabX (modified)
+// @author          SihabX
 // @match           http://*/*
 // @run-at          document-start
 // @grant           none
@@ -16,58 +16,47 @@
  */
 const CONFIG = {
     // Speed limits
-    MIN_SPEED: 0.1,      // Minimum playback speed (e.g., 0.1 = 10% speed)
-    MAX_SPEED: 16,       // Maximum playback speed
+    MIN_SPEED: 0.1,
+    MAX_SPEED: 16,
 
-    // Default speed (1.0 = normal)
     DEFAULT_SPEED: 1.0,
 
-    // Button steps (for UI buttons)
-    BUTTON_STEP: 0.1,    // + / - buttons change speed by this amount
-    BUTTON_X2: 2,        // Multiply by X2 button factor
-    BUTTON_HALF: 0.5,    // Divide by 2 button factor
+    BUTTON_STEP: 0.1,
+    BUTTON_X2: 2,
+    BUTTON_HALF: 0.5,
 
-    // Keyboard arrow keys behavior
-    USE_ARROWS: false,   // Enable arrow keys (up/down/left/right) to control speed
-    ARROW_STEP: 0.1,     // Base step for arrow up/down
-    ARROW_SHIFT_STEP: 1, // Step when Shift is held
-    ARROW_CTRL_STEP: 0.01, // Step when Ctrl is held
+    USE_ARROWS: false,
+    ARROW_STEP: 0.1,
+    ARROW_SHIFT_STEP: 1,
+    ARROW_CTRL_STEP: 0.01,
 
-    // Left/Right arrow keys: Left = multiply by 2, Right = divide by 2 (fixed)
+    ENABLE_LEGACY_SHORTCUTS: true,
 
-    // Keyboard shortcuts (Ctrl/Alt + other keys)
-    ENABLE_LEGACY_SHORTCUTS: true, // Enable Ctrl+Alt+[=/-/0/9] shortcuts
+    UI_POSITION: { left: '20px', top: '20%' },
+    UI_BLUR: true,
+    UI_TRANSPARENCY: 0.85,
+    UI_SHOW_TOOLTIPS: true,
+    UI_FLASH_DURATION: 300,
+    LANDSCAPE_MODE: true,
 
-    // UI appearance
-    UI_POSITION: { left: '20px', top: '20%' }, // Default position (can be overridden by drag)
-    UI_BLUR: true,          // Enable backdrop blur
-    UI_TRANSPARENCY: 0.85,  // Background opacity (0 to 1)
-    UI_SHOW_TOOLTIPS: true, // Show tooltips on hover
-    UI_FLASH_DURATION: 300, // Flash overlay duration (ms)
-    LANDSCAPE_MODE: true,   // true = horizontal layout, false = vertical (portrait)
+    // Main panel size (width and height in pixels)
+    UI_PANEL_WIDTH: 'auto',   // 'auto' means auto size based on content, or pixel value like '300px'
+    UI_PANEL_HEIGHT: 'auto',  // 'auto' or pixel value
 
-    // Video handling
-    VIDEO_FORCE_RATE: true,  // Force video playbackRate to match speed
-    VIDEO_OBSERVER: true,    // Watch for dynamically added videos
+    VIDEO_FORCE_RATE: true,
+    VIDEO_OBSERVER: true,
 
-    // Timer hooking
-    HOOK_TIMERS: true,       // Hook setTimeout/setInterval
-    HOOK_RAF: true,          // Hook requestAnimationFrame
-    HOOK_DATE: true,         // Hook Date constructor
+    HOOK_TIMERS: true,
+    HOOK_RAF: true,
+    HOOK_DATE: true,
 
-    // Settings panel
-    ENABLE_SETTINGS_PANEL: true, // Show settings button in UI
+    ENABLE_SETTINGS_PANEL: true,
 
-    // Debug
-    DEBUG: false,            // Log debug messages to console
+    DEBUG: false,
 };
 
 // Base configuration backup (for reset)
 const BASE_CONFIG = JSON.parse(JSON.stringify(CONFIG));
-
-/**
- * ================= END OF CONFIGURATION =================
- */
 
 window.isDOMLoaded = false;
 window.isDOMRendered = false;
@@ -82,7 +71,7 @@ document.addEventListener('readystatechange', function () {
 
     const debug = CONFIG.DEBUG ? (...args) => console.log('[TimerHooker]', ...args) : () => {};
 
-    var extraElements = []; // for shadow DOM
+    var extraElements = [];
 
     var helper = function (eHookContext, timerContext, util) {
         const RATE_SYM = Symbol('timerhooker_rate');
@@ -90,7 +79,6 @@ document.addEventListener('readystatechange', function () {
         let currentStyleNode = null;
         let currentNode = null;
 
-        // Helper to rebuild UI when settings change
         function rebuildUI() {
             if (currentNode && currentNode.parentNode) {
                 currentNode.parentNode.removeChild(currentNode);
@@ -102,7 +90,6 @@ document.addEventListener('readystatechange', function () {
         }
 
         function applyUI() {
-            // CSS (uses CONFIG values)
             var blur = CONFIG.UI_BLUR ? 'backdrop-filter: blur(12px);' : '';
             var opacity = CONFIG.UI_TRANSPARENCY;
             var tooltipStyle = CONFIG.UI_SHOW_TOOLTIPS ? `
@@ -131,10 +118,19 @@ document.addEventListener('readystatechange', function () {
                 }
             ` : '';
 
-            // Orientation-specific styles
             var orientationStyle = CONFIG.LANDSCAPE_MODE ?
-                'display: flex; flex-direction: row; gap: 12px; align-items: center;' :
-                'display: flex; flex-direction: column; gap: 8px; align-items: center; padding: 12px; min-width: 70px; width: auto;';
+                'flex-direction: row; gap: 12px; align-items: center;' :
+                'flex-direction: column; gap: 8px; align-items: center; padding: 12px;';
+
+            // Apply custom width/height if not 'auto'
+            var widthStyle = '';
+            var heightStyle = '';
+            if (CONFIG.UI_PANEL_WIDTH !== 'auto') {
+                widthStyle = `width: ${CONFIG.UI_PANEL_WIDTH};`;
+            }
+            if (CONFIG.UI_PANEL_HEIGHT !== 'auto') {
+                heightStyle = `height: ${CONFIG.UI_PANEL_HEIGHT};`;
+            }
 
             var style = `
                 .th-modern-container {
@@ -149,8 +145,13 @@ document.addEventListener('readystatechange', function () {
                     border: 1px solid rgba(255,255,255,0.2);
                     user-select: none;
                     cursor: grab;
-                    transition: transform 0.2s, box-shadow 0.2s;
+                    transition: box-shadow 0.2s;
+                    display: flex;
                     ${orientationStyle}
+                    ${widthStyle}
+                    ${heightStyle}
+                    min-width: 100px;
+                    min-height: 40px;
                 }
                 .th-modern-container.dragging {
                     cursor: grabbing;
@@ -235,7 +236,6 @@ document.addEventListener('readystatechange', function () {
                     border-radius: 60px;
                     box-shadow: 0 8px 24px rgba(0,0,0,0.3);
                 }
-                /* Settings Panel Modal - Device Friendly */
                 .th-settings-modal {
                     position: fixed;
                     top: 0;
@@ -246,7 +246,7 @@ document.addEventListener('readystatechange', function () {
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    z-index: 100001;
+                    z-index: 100002;
                     font-family: 'Segoe UI', 'Roboto', sans-serif;
                     backdrop-filter: blur(4px);
                 }
@@ -254,25 +254,32 @@ document.addEventListener('readystatechange', function () {
                     background: rgba(30,30,40,0.95);
                     backdrop-filter: blur(12px);
                     border-radius: 24px;
-                    padding: 20px;
                     width: 90%;
-                    max-width: 500px;
+                    max-width: 550px;
                     max-height: 85%;
-                    overflow-y: auto;
                     color: white;
                     border: 1px solid rgba(255,255,255,0.2);
                     box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-                    position: relative;
+                    display: flex;
+                    flex-direction: column;
+                    overflow: hidden;
                 }
-                .th-settings-panel h3 {
-                    margin-top: 0;
-                    text-align: center;
+                .th-settings-header {
+                    padding: 16px 20px;
+                    border-bottom: 1px solid rgba(255,255,255,0.2);
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    font-weight: bold;
+                    background: rgba(30,30,40,0.95);
+                    backdrop-filter: blur(12px);
+                    flex-shrink: 0;
+                }
+                .th-settings-header h3 {
+                    margin: 0;
                     font-size: 1.4rem;
                 }
                 .th-settings-close {
-                    position: absolute;
-                    top: 12px;
-                    right: 16px;
                     background: #ff4444;
                     color: white;
                     border: none;
@@ -285,11 +292,26 @@ document.addEventListener('readystatechange', function () {
                     align-items: center;
                     justify-content: center;
                     transition: 0.2s;
-                    z-index: 10;
                 }
                 .th-settings-close:hover {
                     background: #ff0000;
                     transform: scale(1.1);
+                }
+                .th-settings-content {
+                    flex: 1;
+                    overflow-y: auto;
+                    padding: 20px;
+                }
+                .th-settings-footer {
+                    padding: 12px 20px;
+                    border-top: 1px solid rgba(255,255,255,0.2);
+                    display: flex;
+                    flex-wrap: wrap;
+                    justify-content: flex-start;
+                    gap: 10px;
+                    background: rgba(30,30,40,0.95);
+                    backdrop-filter: blur(12px);
+                    flex-shrink: 0;
                 }
                 .th-settings-panel label {
                     display: block;
@@ -308,8 +330,6 @@ document.addEventListener('readystatechange', function () {
                     box-sizing: border-box;
                 }
                 .th-settings-panel button {
-                    margin-top: 16px;
-                    margin-right: 8px;
                     padding: 8px 16px;
                     border-radius: 40px;
                     border: none;
@@ -321,16 +341,8 @@ document.addEventListener('readystatechange', function () {
                 .th-settings-panel button:hover {
                     background: rgba(255,255,255,0.4);
                 }
-                .th-settings-panel .button-group {
-                    display: flex;
-                    flex-wrap: wrap;
-                    justify-content: flex-end;
-                    margin-top: 20px;
-                    gap: 8px;
-                }
                 @media (max-width: 600px) {
                     .th-settings-panel {
-                        padding: 16px;
                         width: 95%;
                     }
                     .th-btn {
@@ -345,6 +357,10 @@ document.addEventListener('readystatechange', function () {
                     }
                     .th-modern-container {
                         padding: 6px 12px;
+                    }
+                    .th-settings-footer button {
+                        padding: 6px 12px;
+                        font-size: 0.8rem;
                     }
                 }
             `;
@@ -388,7 +404,17 @@ document.addEventListener('readystatechange', function () {
             var cover = node.querySelector('#th-cover');
             var coverText = node.querySelector('#th-cover-text');
 
-            // Draggable
+            // No resize handle - size is controlled via settings
+
+            // Restore saved size from config (if not auto)
+            if (CONFIG.UI_PANEL_WIDTH !== 'auto') {
+                container.style.width = CONFIG.UI_PANEL_WIDTH;
+            }
+            if (CONFIG.UI_PANEL_HEIGHT !== 'auto') {
+                container.style.height = CONFIG.UI_PANEL_HEIGHT;
+            }
+
+            // --- Draggable (only when not clicking on buttons) ---
             var isDragging = false, dragStartX, dragStartY, startLeft, startTop;
             var savedPos = localStorage.getItem('timerHookerPos');
             if (savedPos) {
@@ -400,8 +426,11 @@ document.addEventListener('readystatechange', function () {
                 container.style.left = CONFIG.UI_POSITION.left;
                 container.style.top = CONFIG.UI_POSITION.top;
             }
+
             container.addEventListener('mousedown', function (e) {
-                if (e.target !== container && !container.contains(e.target)) return;
+                // If any button is clicked, do not drag
+                if (e.target.closest('.th-btn')) return;
+                
                 isDragging = true;
                 container.classList.add('dragging');
                 dragStartX = e.clientX;
@@ -438,7 +467,6 @@ document.addEventListener('readystatechange', function () {
                 setTimeout(() => cover.classList.remove('show'), CONFIG.UI_FLASH_DURATION);
             }
 
-            // Button actions
             function changeTime(operation, value) {
                 var current = 1 / timerContext._percentage;
                 var newSpeed;
@@ -469,7 +497,6 @@ document.addEventListener('readystatechange', function () {
 
             timerContext._uiUpdate = updateUI;
 
-            // Save references for removal later
             currentUIContainer = container;
             currentNode = node;
             currentStyleNode = stylenode;
@@ -480,104 +507,117 @@ document.addEventListener('readystatechange', function () {
                         document.head.appendChild(stylenode);
                         document.body.appendChild(node);
                         global.isDOMRendered = true;
-                        debug('Timer Hooker (modern UI) loaded');
+                        debug('Timer Hooker loaded');
                     }
                 });
             } else {
                 document.head.appendChild(stylenode);
                 document.body.appendChild(node);
                 global.isDOMRendered = true;
-                debug('Timer Hooker (modern UI) loaded');
+                debug('Timer Hooker loaded');
             }
         }
 
-        // Settings modal with red close button and tap outside to close
+        // Settings modal with panel size controls
         function showSettingsModal(onSaveCallback) {
-            // Create modal overlay
             const modal = document.createElement('div');
             modal.className = 'th-settings-modal';
             const panel = document.createElement('div');
             panel.className = 'th-settings-panel';
 
-            // Generate form from CONFIG (skip functions, handle special cases)
-            let formHtml = `<h3>⚙ TimeWarp Settings</h3>`;
+            const header = document.createElement('div');
+            header.className = 'th-settings-header';
+            header.innerHTML = '<h3>⚙ TimeWarp Settings</h3>';
+            const closeBtn = document.createElement('button');
+            closeBtn.innerHTML = '✕';
+            closeBtn.className = 'th-settings-close';
+            closeBtn.onclick = () => modal.remove();
+            header.appendChild(closeBtn);
+
+            const content = document.createElement('div');
+            content.className = 'th-settings-content';
+            let formHtml = '';
             for (let [key, value] of Object.entries(CONFIG)) {
                 if (typeof value === 'function') continue;
+                if (key === 'ENABLE_SETTINGS_PANEL') continue;
                 let inputType = 'text';
                 if (typeof value === 'boolean') inputType = 'checkbox';
                 if (typeof value === 'number') inputType = 'number';
                 if (key === 'UI_POSITION') {
-                    formHtml += `<label>${key} (JSON object e.g. {"left":"20px","top":"20%"})<input type="text" id="cfg_${key}" value='${JSON.stringify(value)}' placeholder='{"left":"20px","top":"20%"}'></label>`;
+                    formHtml += `<label>${key} (JSON)<input type="text" id="cfg_${key}" value='${JSON.stringify(value)}'></label>`;
+                    continue;
+                }
+                if (key === 'UI_PANEL_WIDTH' || key === 'UI_PANEL_HEIGHT') {
+                    formHtml += `<label>${key} (pixels e.g. "300px" or "auto")<input type="text" id="cfg_${key}" value="${value}"></label>`;
                     continue;
                 }
                 if (inputType === 'checkbox') {
                     formHtml += `<label><input type="checkbox" id="cfg_${key}" ${value ? 'checked' : ''}> ${key}</label>`;
                 } else {
-                    formHtml += `<label>${key}<input type="${inputType}" id="cfg_${key}" value="${value}" step="${typeof value === 'number' ? 'any' : ''}"></label>`;
+                    formHtml += `<label>${key}<input type="${inputType}" id="cfg_${key}" value="${value}" step="any"></label>`;
                 }
             }
-            formHtml += `<div class="button-group">
-                            <button id="th-settings-import">📂 Import JSON</button>
-                            <button id="th-settings-export">📤 Export JSON</button>
-                            <button id="th-settings-reset" style="background: rgba(255,100,100,0.5);">⟳ Reset to Base</button>
-                            <button id="th-settings-save" style="background: #4CAF50;">💾 Save</button>
-                         </div>`;
+            content.innerHTML = formHtml;
 
-            // Build panel content with close button at top
-            panel.innerHTML = `<button class="th-settings-close" title="Close">✕</button>${formHtml}`;
+            const footer = document.createElement('div');
+            footer.className = 'th-settings-footer';
+            const saveBtn = document.createElement('button');
+            saveBtn.textContent = '💾 Save';
+            saveBtn.style.background = '#4CAF50';
+            const exportBtn = document.createElement('button');
+            exportBtn.textContent = '📤 Export JSON';
+            const importBtn = document.createElement('button');
+            importBtn.textContent = '📂 Import JSON';
+            const resetBtn = document.createElement('button');
+            resetBtn.textContent = '⟳ Reset Default';
+            resetBtn.style.background = 'rgba(255,100,100,0.5)';
+            footer.appendChild(saveBtn);
+            footer.appendChild(exportBtn);
+            footer.appendChild(importBtn);
+            footer.appendChild(resetBtn);
+
+            panel.appendChild(header);
+            panel.appendChild(content);
+            panel.appendChild(footer);
             modal.appendChild(panel);
             document.body.appendChild(modal);
 
-            // Close button functionality
-            const closeBtn = panel.querySelector('.th-settings-close');
-            if (closeBtn) {
-                closeBtn.onclick = () => modal.remove();
-            }
+            modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 
-            // Tap outside to close
-            modal.addEventListener('click', function(e) {
-                if (e.target === modal) {
-                    modal.remove();
-                }
-            });
-
-            // Helper: update CONFIG from form
             function saveSettings() {
                 for (let [key, value] of Object.entries(CONFIG)) {
                     if (typeof value === 'function') continue;
+                    if (key === 'ENABLE_SETTINGS_PANEL') continue;
                     const input = document.getElementById(`cfg_${key}`);
                     if (!input) continue;
                     let newVal;
-                    if (input.type === 'checkbox') {
-                        newVal = input.checked;
-                    } else if (input.type === 'number') {
-                        newVal = parseFloat(input.value);
-                    } else {
+                    if (input.type === 'checkbox') newVal = input.checked;
+                    else if (input.type === 'number') newVal = parseFloat(input.value);
+                    else {
                         if (key === 'UI_POSITION') {
-                            try {
-                                newVal = JSON.parse(input.value);
-                            } catch(e) {
-                                newVal = CONFIG.UI_POSITION;
-                            }
+                            try { newVal = JSON.parse(input.value); } catch(e) { newVal = CONFIG.UI_POSITION; }
                         } else {
                             newVal = input.value;
+                            // For width/height, ensure it's a valid string (pixels or 'auto')
+                            if (key === 'UI_PANEL_WIDTH' || key === 'UI_PANEL_HEIGHT') {
+                                if (newVal !== 'auto' && !/^\d+(px)?$/.test(newVal)) {
+                                    newVal = 'auto';
+                                }
+                            }
                         }
                     }
                     CONFIG[key] = newVal;
                 }
-                // Reapply video speed if needed
                 if (timerContext.changeVideoSpeed) timerContext.changeVideoSpeed(true);
                 if (onSaveCallback) onSaveCallback();
             }
 
             function resetToBase() {
                 for (let key of Object.keys(BASE_CONFIG)) {
-                    if (typeof CONFIG[key] !== 'function') {
-                        CONFIG[key] = JSON.parse(JSON.stringify(BASE_CONFIG[key]));
-                    }
+                    if (typeof CONFIG[key] !== 'function') CONFIG[key] = JSON.parse(JSON.stringify(BASE_CONFIG[key]));
                 }
-                // Refresh form fields
                 for (let [key, value] of Object.entries(CONFIG)) {
+                    if (key === 'ENABLE_SETTINGS_PANEL') continue;
                     const inp = document.getElementById(`cfg_${key}`);
                     if (inp) {
                         if (inp.type === 'checkbox') inp.checked = value;
@@ -585,7 +625,7 @@ document.addEventListener('readystatechange', function () {
                         else inp.value = value;
                     }
                 }
-                alert('Settings reset to base configuration. Click Save to apply.');
+                alert('Reset to base. Click Save.');
             }
 
             function importJSON() {
@@ -600,12 +640,10 @@ document.addEventListener('readystatechange', function () {
                         try {
                             const imported = JSON.parse(ev.target.result);
                             for (let key of Object.keys(imported)) {
-                                if (CONFIG.hasOwnProperty(key)) {
-                                    CONFIG[key] = imported[key];
-                                }
+                                if (CONFIG.hasOwnProperty(key) && key !== 'ENABLE_SETTINGS_PANEL') CONFIG[key] = imported[key];
                             }
-                            // refresh form
                             for (let [key, value] of Object.entries(CONFIG)) {
+                                if (key === 'ENABLE_SETTINGS_PANEL') continue;
                                 const inp = document.getElementById(`cfg_${key}`);
                                 if (inp) {
                                     if (inp.type === 'checkbox') inp.checked = value;
@@ -613,10 +651,8 @@ document.addEventListener('readystatechange', function () {
                                     else inp.value = value;
                                 }
                             }
-                            alert('Configuration imported. Click Save to apply.');
-                        } catch (err) {
-                            alert('Invalid JSON file');
-                        }
+                            alert('Imported. Click Save.');
+                        } catch(err) { alert('Invalid JSON'); }
                     };
                     reader.readAsText(file);
                 };
@@ -626,9 +662,7 @@ document.addEventListener('readystatechange', function () {
             function exportJSON() {
                 const exportConfig = {};
                 for (let key in CONFIG) {
-                    if (typeof CONFIG[key] !== 'function') {
-                        exportConfig[key] = CONFIG[key];
-                    }
+                    if (typeof CONFIG[key] !== 'function' && key !== 'ENABLE_SETTINGS_PANEL') exportConfig[key] = CONFIG[key];
                 }
                 const dataStr = JSON.stringify(exportConfig, null, 2);
                 const blob = new Blob([dataStr], {type: 'application/json'});
@@ -640,38 +674,24 @@ document.addEventListener('readystatechange', function () {
                 URL.revokeObjectURL(url);
             }
 
-            document.getElementById('th-settings-save').onclick = () => {
-                saveSettings();
-                modal.remove();
-            };
-            document.getElementById('th-settings-import').onclick = importJSON;
-            document.getElementById('th-settings-export').onclick = exportJSON;
-            document.getElementById('th-settings-reset').onclick = resetToBase;
+            saveBtn.onclick = () => { saveSettings(); modal.remove(); };
+            importBtn.onclick = importJSON;
+            exportBtn.onclick = exportJSON;
+            resetBtn.onclick = resetToBase;
         }
 
         return {
             applyUI,
             applyGlobalAction: function (timer) {
                 timer.changeTime = function (anum, cnum, isa, isr) {
-                    if (isr) {
-                        global.timer.change(1);
-                        return;
-                    }
+                    if (isr) { global.timer.change(1); return; }
                     if (!global.timer) return;
                     var result;
                     if (!anum && !cnum) {
-                        var t = prompt("Enter speed factor (current: " + (1 / timerContext._percentage).toFixed(2) + "):");
+                        var t = prompt("Speed factor: " + (1 / timerContext._percentage).toFixed(2));
                         if (t == null) return;
-                        if (isNaN(parseFloat(t))) {
-                            alert("Please enter a valid number.");
-                            timer.changeTime();
-                            return;
-                        }
-                        if (parseFloat(t) <= 0) {
-                            alert("Speed factor must be > 0.");
-                            timer.changeTime();
-                            return;
-                        }
+                        if (isNaN(parseFloat(t))) { alert("Invalid"); timer.changeTime(); return; }
+                        if (parseFloat(t) <= 0) { alert(">0"); timer.changeTime(); return; }
                         result = 1 / parseFloat(t);
                     } else {
                         if (isa && anum) {
@@ -686,7 +706,7 @@ document.addEventListener('readystatechange', function () {
                 };
                 global.changeTime = timer.changeTime;
             },
-            applyHooking: function () {
+            applyHooking: function () { 
                 var _this = this;
                 if (CONFIG.HOOK_TIMERS) {
                     eHookContext.hookReplace(window, 'setInterval', function (setInterval) {
@@ -762,14 +782,12 @@ document.addEventListener('readystatechange', function () {
                 timerContext._mDate = window.Date;
                 this.hookShadowRoot();
             },
-            getHookedDateConstructor: function () {
+            getHookedDateConstructor: function () { 
                 return function () {
                     if (arguments.length === 1) {
                         Object.defineProperty(this, '_innerDate', {
-                            configurable: false,
-                            enumerable: false,
-                            value: new timerContext._Date(arguments[0]),
-                            writable: false
+                            configurable: false, enumerable: false,
+                            value: new timerContext._Date(arguments[0]), writable: false
                         });
                         return;
                     } else if (arguments.length > 1) {
@@ -780,26 +798,15 @@ document.addEventListener('readystatechange', function () {
                             case 4: definedValue = new timerContext._Date(arguments[0], arguments[1], arguments[2], arguments[3]); break;
                             case 5: definedValue = new timerContext._Date(arguments[0], arguments[1], arguments[2], arguments[3], arguments[4]); break;
                             case 6: definedValue = new timerContext._Date(arguments[0], arguments[1], arguments[2], arguments[3], arguments[4], arguments[5]); break;
-                            default:
-                            case 7: definedValue = new timerContext._Date(arguments[0], arguments[1], arguments[2], arguments[3], arguments[4], arguments[5], arguments[6]); break;
+                            default: definedValue = new timerContext._Date(arguments[0], arguments[1], arguments[2], arguments[3], arguments[4], arguments[5], arguments[6]); break;
                         }
-                        Object.defineProperty(this, '_innerDate', {
-                            configurable: false,
-                            enumerable: false,
-                            value: definedValue,
-                            writable: false
-                        });
+                        Object.defineProperty(this, '_innerDate', { configurable: false, enumerable: false, value: definedValue, writable: false });
                         return;
                     }
                     var now = timerContext._Date.now();
                     var passTime = now - timerContext.__lastDatetime;
                     var hookPassTime = passTime * (1 / timerContext._percentage);
-                    Object.defineProperty(this, '_innerDate', {
-                        configurable: false,
-                        enumerable: false,
-                        value: new timerContext._Date(timerContext.__lastMDatetime + hookPassTime),
-                        writable: false
-                    });
+                    Object.defineProperty(this, '_innerDate', { configurable: false, enumerable: false, value: new timerContext._Date(timerContext.__lastMDatetime + hookPassTime), writable: false });
                 };
             },
             getHookedTimerFunction: function (type, timer) {
@@ -822,12 +829,8 @@ document.addEventListener('readystatechange', function () {
                     arguments[1] *= timerContext._percentage;
                     var resultId = timer.apply(window, arguments);
                     timerContext[property][resultId] = {
-                        args: arguments,
-                        originMS: originMS,
-                        originId: resultId,
-                        nowId: resultId,
-                        uniqueId: uniqueId,
-                        oldPercentage: timerContext._percentage,
+                        args: arguments, originMS: originMS, originId: resultId, nowId: resultId,
+                        uniqueId: uniqueId, oldPercentage: timerContext._percentage,
                         exceptNextFireTime: timerContext._Date.now() + originMS
                     };
                     return resultId;
@@ -846,7 +849,6 @@ document.addEventListener('readystatechange', function () {
             },
             registerShortcutKeys: function (timer) {
                 addEventListener('keydown', function (e) {
-                    // Arrow keys only if enabled
                     if (CONFIG.USE_ARROWS && (e.target === document.body || e.target === document.documentElement || e.target.tagName !== 'INPUT')) {
                         let step = CONFIG.ARROW_STEP;
                         if (e.shiftKey) step = CONFIG.ARROW_SHIFT_STEP;
@@ -863,20 +865,16 @@ document.addEventListener('readystatechange', function () {
                             timer.change(1 / newSpeed);
                         } else if (e.key === 'ArrowLeft') {
                             e.preventDefault();
-                            // Left arrow = multiply by 2
                             var current = 1 / timerContext._percentage;
                             var newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current * 2));
                             timer.change(1 / newSpeed);
                         } else if (e.key === 'ArrowRight') {
                             e.preventDefault();
-                            // Right arrow = divide by 2
                             var current = 1 / timerContext._percentage;
                             var newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current / 2));
                             timer.change(1 / newSpeed);
                         }
                     }
-
-                    // Legacy shortcuts (Ctrl+Alt+...)
                     if (CONFIG.ENABLE_LEGACY_SHORTCUTS && (e.ctrlKey || e.altKey)) {
                         const key = e.key;
                         switch (key) {
@@ -884,13 +882,11 @@ document.addEventListener('readystatechange', function () {
                                 if (key === '9' && (e.ctrlKey || e.altKey)) timer.changeTime();
                                 if (key === '0' && (e.ctrlKey || e.altKey)) timer.changeTime(0, 0, false, true);
                                 break;
-                            case '=':
-                            case '+':
+                            case '=': case '+':
                                 if (e.ctrlKey) timer.changeTime(2, 0, true);
                                 else if (e.altKey) timer.changeTime(0, 2);
                                 break;
-                            case '-':
-                            case '_':
+                            case '-': case '_':
                                 if (e.ctrlKey) timer.changeTime(-2, 0, true);
                                 else if (e.altKey) timer.changeTime(0, -2);
                                 break;
@@ -925,11 +921,10 @@ document.addEventListener('readystatechange', function () {
             },
             hookShadowRoot: function () {
                 var origin = Element.prototype.attachShadow;
-                eHookContext.hookAfter(Element.prototype, 'attachShadow',
-                    function (m, args, result) {
-                        extraElements.push(result);
-                        return result;
-                    }, false);
+                eHookContext.hookAfter(Element.prototype, 'attachShadow', function (m, args, result) {
+                    extraElements.push(result);
+                    return result;
+                }, false);
                 eHookContext.hookedToString(origin, Element.prototype.attachShadow);
             },
             hookDefine: function () {
@@ -1015,25 +1010,19 @@ document.addEventListener('readystatechange', function () {
     var normalUtil = {
         isInIframe: function () {
             let is = global.parent !== global;
-            try {
-                is = is && global.parent.document.body.tagName !== 'FRAMESET';
-            } catch (e) {}
+            try { is = is && global.parent.document.body.tagName !== 'FRAMESET'; } catch(e) {}
             return is;
         },
         listenParentEvent: function (handler) {
             global.addEventListener('message', function (e) {
                 var data = e.data;
-                if (data.type === 'changePercentage') {
-                    handler(data.percentage);
-                }
+                if (data.type === 'changePercentage') handler(data.percentage);
             });
         },
         sendChangesToIframe: function (percentage) {
             var iframes = document.querySelectorAll('iframe, frame');
             for (var i = 0; i < iframes.length; i++) {
-                try {
-                    iframes[i].contentWindow.postMessage({ type: 'changePercentage', percentage: percentage }, '*');
-                } catch(e) {}
+                try { iframes[i].contentWindow.postMessage({ type: 'changePercentage', percentage: percentage }, '*'); } catch(e) {}
             }
         }
     };
@@ -1053,23 +1042,13 @@ document.addEventListener('readystatechange', function () {
         return function (util) {
             var eHookContext = this;
             var timerHooker = {
-                _intervalIds: {},
-                _timeoutIds: {},
-                _auoUniqueId: 1,
+                _intervalIds: {}, _timeoutIds: {}, _auoUniqueId: 1,
                 __percentage: 1 / CONFIG.DEFAULT_SPEED,
-                _setInterval: window['setInterval'],
-                _clearInterval: window['clearInterval'],
-                _clearTimeout: window['clearTimeout'],
-                _setTimeout: window['setTimeout'],
+                _setInterval: window['setInterval'], _clearInterval: window['clearInterval'],
+                _clearTimeout: window['clearTimeout'], _setTimeout: window['setTimeout'],
                 _Date: window['Date'],
-                __lastDatetime: new Date().getTime(),
-                __lastMDatetime: new Date().getTime(),
-                videoSpeedInterval: 1000,
-                defineProperty: Object.defineProperty,
-                defineProperties: Object.defineProperties,
-                genUniqueId: function () {
-                    return this._auoUniqueId++;
-                },
+                __lastDatetime: new Date().getTime(), __lastMDatetime: new Date().getTime(),
+                genUniqueId: function () { return this._auoUniqueId++; },
                 notifyExec: function (uniqueId) {
                     if (uniqueId) {
                         for (var id in this._timeoutIds) {
@@ -1083,32 +1062,24 @@ document.addEventListener('readystatechange', function () {
                 init: function () {
                     var timerContext = this;
                     var h = helper(eHookContext, timerContext, util);
-
                     h.hookDefine();
                     h.applyHooking();
                     h.watchForVideos();
-
                     Object.defineProperty(timerContext, '_percentage', {
-                        get: function () { return timerContext.__percentage; },
-                        set: function (percentage) {
+                        get: () => timerContext.__percentage,
+                        set: function(percentage) {
                             if (percentage === timerContext.__percentage) return percentage;
                             h.percentageChangeHandler(percentage);
                             timerContext.__percentage = percentage;
                             return percentage;
                         }
                     });
-
                     if (!normalUtil.isInIframe()) {
-                        debug('Loading outer window...');
                         h.applyUI();
                         h.applyGlobalAction(timerContext);
                         h.registerShortcutKeys(timerContext);
                     } else {
-                        debug('Loading inner window...');
-                        normalUtil.listenParentEvent(function (percentage) {
-                            debug('Inner changed to', percentage);
-                            this.change(percentage);
-                        }.bind(this));
+                        normalUtil.listenParentEvent(function (percentage) { this.change(percentage); }.bind(this));
                     }
                 },
                 change: function (percentage) {
@@ -1123,9 +1094,7 @@ document.addEventListener('readystatechange', function () {
                     var rate = 1 / this._percentage;
                     rate = Math.min(CONFIG.MAX_SPEED, Math.max(CONFIG.MIN_SPEED, rate));
                     var videos = querySelectorAll(document, 'video', true);
-                    for (var i = 0; i < videos.length; i++) {
-                        h.changePlaybackRate(videos[i], rate);
-                    }
+                    for (var i = 0; i < videos.length; i++) h.changePlaybackRate(videos[i], rate);
                 }
             };
             timerHooker.init();
@@ -1134,9 +1103,6 @@ document.addEventListener('readystatechange', function () {
     };
 
     if (global.eHook) {
-        global.eHook.plugins({
-            name: 'timer',
-            mount: generate()
-        });
+        global.eHook.plugins({ name: 'timer', mount: generate() });
     }
 }(window);
