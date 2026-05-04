@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            TimeWarp
-// @version         2.7
-// @description     Control timer speeds, skip video ads, speed up/down videos. Modern UI, arrow keys, fully configurable. Hook timer functions to change speed. Landscape/portrait, left/right multiply/divide by 2, settings panel with import/export/reset, tap outside to close, MAIN PANEL size adjustable via settings (no resize handle).
+// @version         2.8
+// @description     Control timer speeds, skip video ads, speed up/down videos. Modern UI, arrow keys, fully configurable. Hook timer functions to change speed. Landscape/portrait, left/right multiply/divide by 2, settings panel with import/export/reset, tap outside to close, main panel HIDE/SHOW button with persistent state and floating show button.
 // @include         *
 // @require         https://greasyfork.org/scripts/372672-everything-hook/code/Everything-Hook.js?version=881251
 // @author          SihabX
@@ -15,47 +15,32 @@
  * ================= CONFIGURATION (Edit these values as you like) =================
  */
 const CONFIG = {
-    // Speed limits
     MIN_SPEED: 0.1,
     MAX_SPEED: 16,
-
     DEFAULT_SPEED: 1.0,
-
     BUTTON_STEP: 0.1,
     BUTTON_X2: 2,
     BUTTON_HALF: 0.5,
-
     USE_ARROWS: false,
     ARROW_STEP: 0.1,
     ARROW_SHIFT_STEP: 1,
     ARROW_CTRL_STEP: 0.01,
-
     ENABLE_LEGACY_SHORTCUTS: true,
-
     UI_POSITION: { left: '20px', top: '20%' },
     UI_BLUR: true,
     UI_TRANSPARENCY: 0.85,
     UI_SHOW_TOOLTIPS: true,
     UI_FLASH_DURATION: 300,
     LANDSCAPE_MODE: true,
-
-    // Main panel size (width and height in pixels)
-    UI_PANEL_WIDTH: 'auto',   // 'auto' means auto size based on content, or pixel value like '300px'
-    UI_PANEL_HEIGHT: 'auto',  // 'auto' or pixel value
-
     VIDEO_FORCE_RATE: true,
     VIDEO_OBSERVER: true,
-
     HOOK_TIMERS: true,
     HOOK_RAF: true,
     HOOK_DATE: true,
-
     ENABLE_SETTINGS_PANEL: true,
-
     DEBUG: false,
 };
 
-// Base configuration backup (for reset)
 const BASE_CONFIG = JSON.parse(JSON.stringify(CONFIG));
 
 window.isDOMLoaded = false;
@@ -78,6 +63,7 @@ document.addEventListener('readystatechange', function () {
         let currentUIContainer = null;
         let currentStyleNode = null;
         let currentNode = null;
+        let currentShowButton = null;
 
         function rebuildUI() {
             if (currentNode && currentNode.parentNode) {
@@ -85,6 +71,9 @@ document.addEventListener('readystatechange', function () {
             }
             if (currentStyleNode && currentStyleNode.parentNode) {
                 currentStyleNode.parentNode.removeChild(currentStyleNode);
+            }
+            if (currentShowButton && currentShowButton.parentNode) {
+                currentShowButton.parentNode.removeChild(currentShowButton);
             }
             applyUI();
         }
@@ -122,16 +111,6 @@ document.addEventListener('readystatechange', function () {
                 'flex-direction: row; gap: 12px; align-items: center;' :
                 'flex-direction: column; gap: 8px; align-items: center; padding: 12px;';
 
-            // Apply custom width/height if not 'auto'
-            var widthStyle = '';
-            var heightStyle = '';
-            if (CONFIG.UI_PANEL_WIDTH !== 'auto') {
-                widthStyle = `width: ${CONFIG.UI_PANEL_WIDTH};`;
-            }
-            if (CONFIG.UI_PANEL_HEIGHT !== 'auto') {
-                heightStyle = `height: ${CONFIG.UI_PANEL_HEIGHT};`;
-            }
-
             var style = `
                 .th-modern-container {
                     position: fixed;
@@ -148,10 +127,6 @@ document.addEventListener('readystatechange', function () {
                     transition: box-shadow 0.2s;
                     display: flex;
                     ${orientationStyle}
-                    ${widthStyle}
-                    ${heightStyle}
-                    min-width: 100px;
-                    min-height: 40px;
                 }
                 .th-modern-container.dragging {
                     cursor: grabbing;
@@ -207,6 +182,12 @@ document.addEventListener('readystatechange', function () {
                 .th-settings:hover {
                     background: rgba(100,100,255,0.6);
                 }
+                .th-hide {
+                    background: rgba(255,200,100,0.3);
+                }
+                .th-hide:hover {
+                    background: rgba(255,200,100,0.6);
+                }
                 ${tooltipStyle}
                 .th-cover {
                     position: fixed;
@@ -235,6 +216,34 @@ document.addEventListener('readystatechange', function () {
                     padding: 24px 48px;
                     border-radius: 60px;
                     box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+                }
+                /* Floating Show Button */
+                .th-show-button {
+                    position: fixed;
+                    z-index: 100001;
+                    background: rgba(30,30,40,0.95);
+                    backdrop-filter: blur(12px);
+                    border-radius: 40px;
+                    padding: 8px 16px;
+                    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+                    border: 1px solid rgba(255,255,255,0.2);
+                    cursor: pointer;
+                    font-family: 'Segoe UI', 'Roboto', sans-serif;
+                    font-weight: bold;
+                    color: white;
+                    font-size: 1rem;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    transition: 0.2s;
+                }
+                .th-show-button:hover {
+                    background: rgba(30,30,40,1);
+                    transform: scale(1.02);
+                }
+                .th-show-button.dragging-show {
+                    cursor: grabbing;
+                    opacity: 0.9;
                 }
                 .th-settings-modal {
                     position: fixed;
@@ -362,6 +371,10 @@ document.addEventListener('readystatechange', function () {
                         padding: 6px 12px;
                         font-size: 0.8rem;
                     }
+                    .th-show-button {
+                        padding: 6px 12px;
+                        font-size: 0.9rem;
+                    }
                 }
             `;
 
@@ -372,6 +385,10 @@ document.addEventListener('readystatechange', function () {
                 <div class="th-btn th-settings th-tooltip" data-tooltip="Settings" id="th-settings">⚙</div>
             ` : '';
 
+            var hideShowBtnHtml = `
+                <div class="th-btn th-hide th-tooltip" data-tooltip="Hide Panel" id="th-hide-show">👁</div>
+            `;
+
             var html = `
                 <div class="th-modern-container" id="th-container">
                     <div class="th-speed-display" id="th-speed">x${speed}</div>
@@ -381,6 +398,7 @@ document.addEventListener('readystatechange', function () {
                     <div class="th-btn th-tooltip" data-tooltip="Divide by ${1/CONFIG.BUTTON_HALF}" id="th-half">÷${1/CONFIG.BUTTON_HALF}</div>
                     <div class="th-btn th-reset th-tooltip" data-tooltip="Reset to 1x" id="th-reset">⟳</div>
                     ${settingsBtnHtml}
+                    ${hideShowBtnHtml}
                 </div>
                 <div class="th-cover" id="th-cover">
                     <span id="th-cover-text">x${speed}</span>
@@ -403,18 +421,96 @@ document.addEventListener('readystatechange', function () {
             var speedDisplay = node.querySelector('#th-speed');
             var cover = node.querySelector('#th-cover');
             var coverText = node.querySelector('#th-cover-text');
+            var hideShowBtn = node.querySelector('#th-hide-show');
 
-            // No resize handle - size is controlled via settings
-
-            // Restore saved size from config (if not auto)
-            if (CONFIG.UI_PANEL_WIDTH !== 'auto') {
-                container.style.width = CONFIG.UI_PANEL_WIDTH;
+            // --- Hide/Show functionality with localStorage ---
+            let isHidden = localStorage.getItem('timewarp_hidden') === 'true';
+            
+            function updateHiddenState() {
+                if (isHidden) {
+                    container.style.display = 'none';
+                    if (hideShowBtn) hideShowBtn.setAttribute('data-tooltip', 'Show Panel');
+                    // Show floating button
+                    if (!currentShowButton) {
+                        createShowButton();
+                    } else {
+                        currentShowButton.style.display = 'flex';
+                    }
+                } else {
+                    container.style.display = 'flex';
+                    if (hideShowBtn) hideShowBtn.setAttribute('data-tooltip', 'Hide Panel');
+                    if (currentShowButton) currentShowButton.style.display = 'none';
+                }
+                localStorage.setItem('timewarp_hidden', isHidden);
             }
-            if (CONFIG.UI_PANEL_HEIGHT !== 'auto') {
-                container.style.height = CONFIG.UI_PANEL_HEIGHT;
+            
+            function createShowButton() {
+                if (currentShowButton && currentShowButton.parentNode) return;
+                const showBtn = document.createElement('div');
+                showBtn.className = 'th-show-button';
+                showBtn.innerHTML = '⏵ TimeWarp';
+                showBtn.style.left = container.style.left;
+                showBtn.style.top = container.style.top;
+                showBtn.style.cursor = 'grab';
+                
+                // Make show button draggable
+                let isDraggingShow = false;
+                let dragStartX, dragStartY, startLeft, startTop;
+                
+                showBtn.addEventListener('mousedown', (e) => {
+                    if (e.target === showBtn || showBtn.contains(e.target)) {
+                        isDraggingShow = true;
+                        showBtn.classList.add('dragging-show');
+                        dragStartX = e.clientX;
+                        dragStartY = e.clientY;
+                        startLeft = parseInt(showBtn.style.left) || parseInt(container.style.left) || 20;
+                        startTop = parseInt(showBtn.style.top) || parseInt(container.style.top) || (window.innerHeight * 0.2);
+                        e.preventDefault();
+                    }
+                });
+                window.addEventListener('mousemove', (e) => {
+                    if (!isDraggingShow) return;
+                    let newLeft = startLeft + (e.clientX - dragStartX);
+                    let newTop = startTop + (e.clientY - dragStartY);
+                    showBtn.style.left = newLeft + 'px';
+                    showBtn.style.top = newTop + 'px';
+                    showBtn.style.right = 'auto';
+                });
+                window.addEventListener('mouseup', () => {
+                    if (isDraggingShow) {
+                        isDraggingShow = false;
+                        showBtn.classList.remove('dragging-show');
+                        // Save position for both main panel and show button
+                        let left = parseInt(showBtn.style.left);
+                        let top = parseInt(showBtn.style.top);
+                        container.style.left = left + 'px';
+                        container.style.top = top + 'px';
+                        localStorage.setItem('timerHookerPos', JSON.stringify({ left, top }));
+                    }
+                });
+                
+                showBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    isHidden = false;
+                    updateHiddenState();
+                };
+                document.body.appendChild(showBtn);
+                currentShowButton = showBtn;
             }
-
-            // --- Draggable (only when not clicking on buttons) ---
+            
+            function toggleHideShow() {
+                isHidden = !isHidden;
+                updateHiddenState();
+            }
+            
+            if (hideShowBtn) {
+                hideShowBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    toggleHideShow();
+                };
+            }
+            
+            // --- Draggable (main panel) ---
             var isDragging = false, dragStartX, dragStartY, startLeft, startTop;
             var savedPos = localStorage.getItem('timerHookerPos');
             if (savedPos) {
@@ -426,11 +522,9 @@ document.addEventListener('readystatechange', function () {
                 container.style.left = CONFIG.UI_POSITION.left;
                 container.style.top = CONFIG.UI_POSITION.top;
             }
-
+            
             container.addEventListener('mousedown', function (e) {
-                // If any button is clicked, do not drag
                 if (e.target.closest('.th-btn')) return;
-                
                 isDragging = true;
                 container.classList.add('dragging');
                 dragStartX = e.clientX;
@@ -446,6 +540,11 @@ document.addEventListener('readystatechange', function () {
                 container.style.left = newLeft + 'px';
                 container.style.top = newTop + 'px';
                 container.style.right = 'auto';
+                // Also update show button position if exists
+                if (currentShowButton) {
+                    currentShowButton.style.left = newLeft + 'px';
+                    currentShowButton.style.top = newTop + 'px';
+                }
             });
             window.addEventListener('mouseup', function () {
                 if (isDragging) {
@@ -457,7 +556,10 @@ document.addEventListener('readystatechange', function () {
                     }));
                 }
             });
-
+            
+            // Initialize hidden state
+            updateHiddenState();
+            
             // Update UI function
             function updateUI(percentage) {
                 var newSpeed = (1 / percentage).toFixed(2);
@@ -466,41 +568,35 @@ document.addEventListener('readystatechange', function () {
                 cover.classList.add('show');
                 setTimeout(() => cover.classList.remove('show'), CONFIG.UI_FLASH_DURATION);
             }
-
+            
             function changeTime(operation, value) {
                 var current = 1 / timerContext._percentage;
                 var newSpeed;
                 switch (operation) {
-                    case 'add':
-                        newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current + value));
-                        break;
-                    case 'multiply':
-                        newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current * value));
-                        break;
-                    case 'reset':
-                        newSpeed = CONFIG.DEFAULT_SPEED;
-                        break;
+                    case 'add': newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current + value)); break;
+                    case 'multiply': newSpeed = Math.max(CONFIG.MIN_SPEED, Math.min(CONFIG.MAX_SPEED, current * value)); break;
+                    case 'reset': newSpeed = CONFIG.DEFAULT_SPEED; break;
                     default: return;
                 }
                 timerContext.change(1 / newSpeed);
             }
-
+            
             node.querySelector('#th-up').onclick = () => changeTime('add', CONFIG.BUTTON_STEP);
             node.querySelector('#th-down').onclick = () => changeTime('add', -CONFIG.BUTTON_STEP);
             node.querySelector('#th-x2').onclick = () => changeTime('multiply', CONFIG.BUTTON_X2);
             node.querySelector('#th-half').onclick = () => changeTime('multiply', CONFIG.BUTTON_HALF);
             node.querySelector('#th-reset').onclick = () => changeTime('reset');
-
+            
             if (CONFIG.ENABLE_SETTINGS_PANEL) {
                 node.querySelector('#th-settings').onclick = () => showSettingsModal(rebuildUI);
             }
-
+            
             timerContext._uiUpdate = updateUI;
-
+            
             currentUIContainer = container;
             currentNode = node;
             currentStyleNode = stylenode;
-
+            
             if (!global.isDOMLoaded) {
                 document.addEventListener('readystatechange', function () {
                     if ((document.readyState === "interactive" || document.readyState === "complete") && !global.isDOMRendered) {
@@ -518,7 +614,7 @@ document.addEventListener('readystatechange', function () {
             }
         }
 
-        // Settings modal with panel size controls
+        // Settings modal (unchanged, works)
         function showSettingsModal(onSaveCallback) {
             const modal = document.createElement('div');
             modal.className = 'th-settings-modal';
@@ -545,10 +641,6 @@ document.addEventListener('readystatechange', function () {
                 if (typeof value === 'number') inputType = 'number';
                 if (key === 'UI_POSITION') {
                     formHtml += `<label>${key} (JSON)<input type="text" id="cfg_${key}" value='${JSON.stringify(value)}'></label>`;
-                    continue;
-                }
-                if (key === 'UI_PANEL_WIDTH' || key === 'UI_PANEL_HEIGHT') {
-                    formHtml += `<label>${key} (pixels e.g. "300px" or "auto")<input type="text" id="cfg_${key}" value="${value}"></label>`;
                     continue;
                 }
                 if (inputType === 'checkbox') {
@@ -596,15 +688,7 @@ document.addEventListener('readystatechange', function () {
                     else {
                         if (key === 'UI_POSITION') {
                             try { newVal = JSON.parse(input.value); } catch(e) { newVal = CONFIG.UI_POSITION; }
-                        } else {
-                            newVal = input.value;
-                            // For width/height, ensure it's a valid string (pixels or 'auto')
-                            if (key === 'UI_PANEL_WIDTH' || key === 'UI_PANEL_HEIGHT') {
-                                if (newVal !== 'auto' && !/^\d+(px)?$/.test(newVal)) {
-                                    newVal = 'auto';
-                                }
-                            }
-                        }
+                        } else newVal = input.value;
                     }
                     CONFIG[key] = newVal;
                 }
@@ -706,7 +790,7 @@ document.addEventListener('readystatechange', function () {
                 };
                 global.changeTime = timer.changeTime;
             },
-            applyHooking: function () { 
+            applyHooking: function () {
                 var _this = this;
                 if (CONFIG.HOOK_TIMERS) {
                     eHookContext.hookReplace(window, 'setInterval', function (setInterval) {
@@ -782,7 +866,7 @@ document.addEventListener('readystatechange', function () {
                 timerContext._mDate = window.Date;
                 this.hookShadowRoot();
             },
-            getHookedDateConstructor: function () { 
+            getHookedDateConstructor: function () {
                 return function () {
                     if (arguments.length === 1) {
                         Object.defineProperty(this, '_innerDate', {
