@@ -117,7 +117,7 @@ const CONFIG = {
     ENABLE_SETTINGS_PANEL: true,
 
     DEBUG: false,
-};
+};```
 
 
 ## 🐛 Troubleshooting
