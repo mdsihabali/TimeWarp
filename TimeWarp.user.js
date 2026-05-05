@@ -3,8 +3,8 @@
 // @version         2.8
 // @description     Control timer speeds, skip video ads, speed up/down videos. Modern UI, arrow keys, fully configurable. Hook timer functions to change speed. Landscape/portrait, left/right multiply/divide by 2, settings panel with import/export/reset, tap outside to close, main panel HIDE/SHOW button with persistent state and floating show button.
 // @include         *
-// @require         https://greasyfork.org/scripts/372672-everything-hook/code/Everything-Hook.js?version=881251
-// @author          SihabX
+// @require         https://raw.githubusercontent.com/mdsihabali/TimeWarp/refs/heads/main/EverythingHook.js
+// @author          SihabX (modified)
 // @match           http://*/*
 // @run-at          document-start
 // @grant           none
@@ -425,7 +425,7 @@ document.addEventListener('readystatechange', function () {
 
             // --- Hide/Show functionality with localStorage ---
             let isHidden = localStorage.getItem('timewarp_hidden') === 'true';
-            
+
             function updateHiddenState() {
                 if (isHidden) {
                     container.style.display = 'none';
@@ -443,7 +443,7 @@ document.addEventListener('readystatechange', function () {
                 }
                 localStorage.setItem('timewarp_hidden', isHidden);
             }
-            
+
             function createShowButton() {
                 if (currentShowButton && currentShowButton.parentNode) return;
                 const showBtn = document.createElement('div');
@@ -452,11 +452,11 @@ document.addEventListener('readystatechange', function () {
                 showBtn.style.left = container.style.left;
                 showBtn.style.top = container.style.top;
                 showBtn.style.cursor = 'grab';
-                
+
                 // Make show button draggable
                 let isDraggingShow = false;
                 let dragStartX, dragStartY, startLeft, startTop;
-                
+
                 showBtn.addEventListener('mousedown', (e) => {
                     if (e.target === showBtn || showBtn.contains(e.target)) {
                         isDraggingShow = true;
@@ -488,7 +488,7 @@ document.addEventListener('readystatechange', function () {
                         localStorage.setItem('timerHookerPos', JSON.stringify({ left, top }));
                     }
                 });
-                
+
                 showBtn.onclick = (e) => {
                     e.stopPropagation();
                     isHidden = false;
@@ -497,19 +497,19 @@ document.addEventListener('readystatechange', function () {
                 document.body.appendChild(showBtn);
                 currentShowButton = showBtn;
             }
-            
+
             function toggleHideShow() {
                 isHidden = !isHidden;
                 updateHiddenState();
             }
-            
+
             if (hideShowBtn) {
                 hideShowBtn.onclick = (e) => {
                     e.stopPropagation();
                     toggleHideShow();
                 };
             }
-            
+
             // --- Draggable (main panel) ---
             var isDragging = false, dragStartX, dragStartY, startLeft, startTop;
             var savedPos = localStorage.getItem('timerHookerPos');
@@ -522,7 +522,7 @@ document.addEventListener('readystatechange', function () {
                 container.style.left = CONFIG.UI_POSITION.left;
                 container.style.top = CONFIG.UI_POSITION.top;
             }
-            
+
             container.addEventListener('mousedown', function (e) {
                 if (e.target.closest('.th-btn')) return;
                 isDragging = true;
@@ -556,10 +556,10 @@ document.addEventListener('readystatechange', function () {
                     }));
                 }
             });
-            
+
             // Initialize hidden state
             updateHiddenState();
-            
+
             // Update UI function
             function updateUI(percentage) {
                 var newSpeed = (1 / percentage).toFixed(2);
@@ -568,7 +568,7 @@ document.addEventListener('readystatechange', function () {
                 cover.classList.add('show');
                 setTimeout(() => cover.classList.remove('show'), CONFIG.UI_FLASH_DURATION);
             }
-            
+
             function changeTime(operation, value) {
                 var current = 1 / timerContext._percentage;
                 var newSpeed;
@@ -580,23 +580,23 @@ document.addEventListener('readystatechange', function () {
                 }
                 timerContext.change(1 / newSpeed);
             }
-            
+
             node.querySelector('#th-up').onclick = () => changeTime('add', CONFIG.BUTTON_STEP);
             node.querySelector('#th-down').onclick = () => changeTime('add', -CONFIG.BUTTON_STEP);
             node.querySelector('#th-x2').onclick = () => changeTime('multiply', CONFIG.BUTTON_X2);
             node.querySelector('#th-half').onclick = () => changeTime('multiply', CONFIG.BUTTON_HALF);
             node.querySelector('#th-reset').onclick = () => changeTime('reset');
-            
+
             if (CONFIG.ENABLE_SETTINGS_PANEL) {
                 node.querySelector('#th-settings').onclick = () => showSettingsModal(rebuildUI);
             }
-            
+
             timerContext._uiUpdate = updateUI;
-            
+
             currentUIContainer = container;
             currentNode = node;
             currentStyleNode = stylenode;
-            
+
             if (!global.isDOMLoaded) {
                 document.addEventListener('readystatechange', function () {
                     if ((document.readyState === "interactive" || document.readyState === "complete") && !global.isDOMRendered) {
