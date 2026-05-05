@@ -4,7 +4,7 @@
 // @description     Control timer speeds, skip video ads, speed up/down videos. Modern UI, arrow keys, fully configurable. Hook timer functions to change speed. Landscape/portrait, left/right multiply/divide by 2, settings panel with import/export/reset, tap outside to close, main panel HIDE/SHOW button with persistent state and floating show button.
 // @include         *
 // @require         https://raw.githubusercontent.com/mdsihabali/TimeWarp/refs/heads/main/EverythingHook.js
-// @author          SihabX (modified)
+// @author          SihabX
 // @match           http://*/*
 // @run-at          document-start
 // @grant           none
