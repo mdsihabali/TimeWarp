@@ -1,11 +1,12 @@
 # TimeWarp – Control Time on Any Website
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Userscript](https://img.shields.io/badge/userscript-install-green.svg)](https://raw.githubusercontent.com/YOUR_USERNAME/TimeWarp/main/TimeWarp.user.js) <!-- Replace with actual raw link -->
+[![Userscript](https://img.shields.io/badge/userscript-install-green.svg)](https://raw.githubusercontent.com/mdsihabali/TimeWarp/main/TimeWarp.user.js) <!-- Replace with actual raw link -->
 
 > **TimeWarp** is a powerful userscript that lets you control the speed of JavaScript timers, animations, and video playback on any website. Skip ad timers, speed up tutorials, or slow down animations – all with a modern UI, keyboard shortcuts, and a fully configurable settings panel.
 
-![TimeWarp UI Screenshot](screenshot.png) *(Optional: Add a screenshot of the control panel and settings modal)*
+![TimeWarp UI Screenshot](Assets/screenshot1.png) 
+![TimeWarp UI Screenshot](Assets/screenshot2.png) 
 
 ## ✨ Features
 
@@ -23,11 +24,11 @@
 ## 📦 Installation
 
 1. Install a userscript manager like [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
-2. Because TimeWarp depends on [Everything‑Hook.js](https://greasyfork.org/scripts/372672-everything-hook), you have two options:
+2. Because TimeWarp depends on [EverythingHook.js](https://raw.githubusercontent.com/mdsihabali/TimeWarp/refs/heads/main/EverythingHook.js), you have two options:
    - **Recommended:** Install TimeWarp directly from the link below – it includes the `@require` directive and will automatically fetch Everything‑Hook.
    - **Manual:** Install Everything‑Hook first, then install TimeWarp.
 3. Click the following link to install **TimeWarp**:
-   - [Install TimeWarp](https://raw.githubusercontent.com/YOUR_USERNAME/TimeWarp/main/TimeWarp.user.js) *(Replace with your actual raw GitHub URL)*
+   - [Install TimeWarp](https://raw.githubusercontent.com/mdsihabali/TimeWarp/main/TimeWarp.user.js) *(Replace with your actual raw GitHub URL)*
 4. After installation, you’ll see a small control panel on the left side of the page (draggable). That’s it – you’re ready to warp time!
 
 ## 🎮 Usage
@@ -124,7 +125,7 @@ const CONFIG = {
 
 ### Panel doesn’t appear?
 
-- Make sure both **Everything‑Hook** and **TimeWarp** are installed and active.
+- Make sure both **EverythingHook** and **TimeWarp** are installed and active.
 - Check the browser console (F12) for errors.
 - Try reloading the page.
 
@@ -152,7 +153,7 @@ const CONFIG = {
 
 ## 🤝 Contributing
 
-Contributions are welcome! Feel free to open issues or pull requests on the [GitHub repository](https://github.com/YOUR_USERNAME/TimeWarp). Areas for improvement include:
+Contributions are welcome! Feel free to open issues or pull requests on the [GitHub repository](https://github.com/mdsihabali/TimeWarp). Areas for improvement include:
 
 - Better support for Web Workers and `Performance` API.
 - Additional UI themes.
